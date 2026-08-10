@@ -1,0 +1,88 @@
+<div class="card">
+   <div class="card-header">
+      <h3 class="card-title">{{ __('Synchronized agents', 'pellissarisync') }}</h3>
+   </div>
+
+   {% if agents is empty %}
+      <div class="card-body">
+         <div class="alert alert-info mb-0">
+            {{ __('No agent has connected yet. Copy the enrollment token from the configuration screen into an agent and press "Connect to the master" there.', 'pellissarisync') }}
+         </div>
+      </div>
+   {% else %}
+      <div class="table-responsive">
+         <table class="table table-hover card-table">
+            <thead>
+               <tr>
+                  <th>{{ __('Name') }}</th>
+                  <th>{{ __('Customer', 'pellissarisync') }}</th>
+                  <th>{{ __('Entity') }}</th>
+                  <th>{{ __('Status') }}</th>
+                  <th class="text-end">{{ __('Tickets', 'pellissarisync') }}</th>
+                  <th>{{ __('Last contact', 'pellissarisync') }}</th>
+                  <th>{{ __('Version') }}</th>
+                  <th></th>
+               </tr>
+            </thead>
+            <tbody>
+               {% for row in agents %}
+                  <tr>
+                     <td>
+                        <a href="{{ path('/plugins/pellissarisync/front/agent.form.php', {'id': row.fields.id}) }}">
+                           {{ row.fields.name }}
+                        </a>
+                        <div class="text-muted font-monospace small">{{ row.fields.uuid }}</div>
+                     </td>
+                     <td>{{ row.fields.client_name }}</td>
+                     <td>
+                        {% if row.entity_name %}
+                           {{ row.entity_name }}
+                        {% else %}
+                           <span class="text-danger">{{ __('Not associated', 'pellissarisync') }}</span>
+                        {% endif %}
+                     </td>
+                     <td>
+                        {% if row.usable %}
+                           <span class="badge bg-green">{{ row.status_label }}</span>
+                        {% elseif row.fields.link_status == 'pending' %}
+                           <span class="badge bg-orange">{{ row.status_label }}</span>
+                        {% else %}
+                           <span class="badge bg-red">{{ row.status_label }}</span>
+                        {% endif %}
+                        {% if not row.fields.is_active %}
+                           <span class="badge bg-secondary">{{ __('Inactive') }}</span>
+                        {% endif %}
+                     </td>
+                     <td class="text-end">{{ row.tickets }}</td>
+                     <td>
+                        {{ row.fields.last_contact ?? '-' }}
+                        {% if row.fields.last_error %}
+                           <div class="text-danger small">{{ row.fields.last_error }}</div>
+                        {% endif %}
+                     </td>
+                     <td class="small">
+                        {% if row.fields.remote_glpi_version %}
+                           GLPI {{ row.fields.remote_glpi_version }}<br />
+                           <span class="text-muted">{{ row.fields.remote_plugin_version }}</span>
+                        {% else %}
+                           -
+                        {% endif %}
+                     </td>
+                     <td class="text-end">
+                        {% if can_edit %}
+                           <form method="post" action="{{ path('/plugins/pellissarisync/front/agent.php') }}">
+                              <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}" />
+                              <button type="submit" name="ping" value="{{ row.fields.id }}"
+                                      class="btn btn-sm btn-outline-primary">
+                                 <i class="ti ti-wifi"></i> {{ __('Ping', 'pellissarisync') }}
+                              </button>
+                           </form>
+                        {% endif %}
+                     </td>
+                  </tr>
+               {% endfor %}
+            </tbody>
+         </table>
+      </div>
+   {% endif %}
+</div>

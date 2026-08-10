@@ -1,0 +1,69 @@
+<div class="card">
+   <div class="card-header">
+      <h3 class="card-title">{{ __('Mirrored tickets', 'pellissarisync') }}</h3>
+      {% if pending_count > 0 %}
+         <div class="card-actions">
+            <span class="badge bg-orange">
+               {{ pending_count }} {{ __('deliveries awaiting retry', 'pellissarisync') }}
+            </span>
+         </div>
+      {% endif %}
+   </div>
+
+   {% if mirrors is empty %}
+      <div class="card-body">
+         <div class="alert alert-info mb-0">
+            {{ __('No ticket has been mirrored yet.', 'pellissarisync') }}
+         </div>
+      </div>
+   {% else %}
+      <div class="table-responsive">
+         <table class="table table-hover card-table">
+            <thead>
+               <tr>
+                  <th>{{ __('Local ticket', 'pellissarisync') }}</th>
+                  <th>{{ __('Title') }}</th>
+                  <th>{{ __('Customer', 'pellissarisync') }}</th>
+                  <th>{{ __('Peer', 'pellissarisync') }}</th>
+                  <th>{{ __('Content owner', 'pellissarisync') }}</th>
+                  <th>{{ __('Remote ticket', 'pellissarisync') }}</th>
+                  <th>{{ __('Status') }}</th>
+                  <th>{{ __('Creation date') }}</th>
+               </tr>
+            </thead>
+            <tbody>
+               {% for row in mirrors %}
+                  <tr>
+                     <td>
+                        <a href="{{ path('/front/ticket.form.php', {'id': row.tickets_id}) }}">
+                           #{{ row.tickets_id }}
+                        </a>
+                     </td>
+                     <td>{{ row.ticket_name }}</td>
+                     <td>{{ row.client_name }}</td>
+                     <td>
+                        {% if row.agent_id %}
+                           <a href="{{ path('/plugins/pellissarisync/front/agent.form.php', {'id': row.agent_id}) }}">
+                              {{ row.agent_name }}
+                           </a>
+                        {% else %}
+                           -
+                        {% endif %}
+                     </td>
+                     <td>{{ row.origin_label }}</td>
+                     <td>
+                        {% if row.remote_tickets_id %}
+                           #{{ row.remote_tickets_id }}
+                        {% else %}
+                           <span class="badge bg-orange">{{ __('not acknowledged yet', 'pellissarisync') }}</span>
+                        {% endif %}
+                     </td>
+                     <td>{{ row.status_label }}</td>
+                     <td>{{ row.date_creation ?? '-' }}</td>
+                  </tr>
+               {% endfor %}
+            </tbody>
+         </table>
+      </div>
+   {% endif %}
+</div>

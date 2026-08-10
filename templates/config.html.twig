@@ -1,0 +1,243 @@
+{% import 'components/form/fields_macros.html.twig' as fields %}
+
+{% set role_options = {
+    (constant('GlpiPlugin\\Pellissarisync\\Config::ROLE_NONE')): __('Not configured', 'pellissarisync'),
+    (constant('GlpiPlugin\\Pellissarisync\\Config::ROLE_AGENT')): __('Agent (customer instance)', 'pellissarisync'),
+    (constant('GlpiPlugin\\Pellissarisync\\Config::ROLE_MASTER')): __('Master (support desk)', 'pellissarisync')
+} %}
+
+<div class="row">
+   <div class="col-12 col-xl-8">
+      <form method="post" action="{{ path('/plugins/pellissarisync/front/config.form.php') }}">
+         <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}" />
+
+         <div class="card mb-3">
+            <div class="card-header">
+               <h3 class="card-title">{{ __('Role of this instance', 'pellissarisync') }}</h3>
+            </div>
+            <div class="card-body">
+               {{ fields.dropdownArrayField('role', role, role_options, __('Role', 'pellissarisync'), {
+                  'display_emptychoice': false
+               }) }}
+
+               <p class="text-muted">
+                  {{ __('The agent runs at the customer and owns the tickets it opens. The master is the Pellissari support desk. The plugin stays inactive until a role is chosen.', 'pellissarisync') }}
+               </p>
+            </div>
+         </div>
+
+         {% if is_agent %}
+            <div class="card mb-3">
+               <div class="card-header">
+                  <h3 class="card-title">{{ __('Connection to the master', 'pellissarisync') }}</h3>
+               </div>
+               <div class="card-body">
+                  {{ fields.textField('master_url', config.master_url, __('Master URL', 'pellissarisync'), {
+                     'helper': __('Base URL of the support desk GLPI, for example http://glpi-master', 'pellissarisync')
+                  }) }}
+
+                  {{ fields.textField('own_url', config.own_url, __('URL of this instance', 'pellissarisync'), {
+                     'helper': __('How the master reaches this agent. Leave empty to use the GLPI base URL.', 'pellissarisync')
+                  }) }}
+
+                  {{ fields.textField('enrollment_token', config.enrollment_token, __('Enrollment token', 'pellissarisync'), {
+                     'helper': __('Copied from the master configuration screen. Used once to obtain dedicated credentials.', 'pellissarisync')
+                  }) }}
+
+                  {{ fields.dropdownField('ITILCategory', 'trigger_itilcategories_id', config.trigger_itilcategories_id, __('Category that triggers mirroring', 'pellissarisync'), {
+                     'entity': 0,
+                     'display_emptychoice': true
+                  }) }}
+               </div>
+            </div>
+         {% endif %}
+
+         {% if is_master %}
+            <div class="card mb-3">
+               <div class="card-header">
+                  <h3 class="card-title">{{ __('Mirroring', 'pellissarisync') }}</h3>
+               </div>
+               <div class="card-body">
+                  {{ fields.dropdownField('ITILCategory', 'mirror_itilcategories_id', config.mirror_itilcategories_id, __('Category used for mirrored tickets', 'pellissarisync'), {
+                     'entity': 0,
+                     'display_emptychoice': true
+                  }) }}
+
+                  {{ fields.textField('title_prefix_template', config.title_prefix_template, __('Title prefix', 'pellissarisync'), {
+                     'helper': __('{client} is replaced by the customer name reported by the agent.', 'pellissarisync')
+                  }) }}
+               </div>
+            </div>
+         {% endif %}
+
+         <div class="text-center mb-4">
+            <button type="submit" name="update" value="1" class="btn btn-primary">
+               <i class="ti ti-device-floppy"></i> {{ __('Save') }}
+            </button>
+         </div>
+      </form>
+
+      {% if is_agent %}
+         <div class="card mb-3">
+            <div class="card-header">
+               <h3 class="card-title">{{ __('Link status', 'pellissarisync') }}</h3>
+            </div>
+            <div class="card-body">
+               <table class="table table-sm">
+                  <tbody>
+                     <tr>
+                        <th>{{ __('Handshake', 'pellissarisync') }}</th>
+                        <td>
+                           {% if config.handshake_status == 'linked' %}
+                              <span class="badge bg-green">{{ __('Linked', 'pellissarisync') }}</span>
+                           {% elseif config.handshake_status == 'pending' %}
+                              <span class="badge bg-orange">{{ __('Awaiting customer association on the master', 'pellissarisync') }}</span>
+                           {% elseif config.handshake_status == 'error' %}
+                              <span class="badge bg-red">{{ __('Error') }}</span>
+                           {% else %}
+                              <span class="badge bg-secondary">{{ __('Never connected', 'pellissarisync') }}</span>
+                           {% endif %}
+                        </td>
+                     </tr>
+                     {% if config.last_handshake %}
+                        <tr>
+                           <th>{{ __('Last handshake', 'pellissarisync') }}</th>
+                           <td>{{ config.last_handshake }}</td>
+                        </tr>
+                     {% endif %}
+                     {% if config.last_handshake_error %}
+                        <tr>
+                           <th>{{ __('Last error') }}</th>
+                           <td class="text-danger">{{ config.last_handshake_error }}</td>
+                        </tr>
+                     {% endif %}
+                     {% if master_agent %}
+                        <tr>
+                           <th>{{ __('Master version', 'pellissarisync') }}</th>
+                           <td>GLPI {{ master_agent.remote_glpi_version }} / plugin {{ master_agent.remote_plugin_version }}</td>
+                        </tr>
+                        <tr>
+                           <th>{{ __('Last contact', 'pellissarisync') }}</th>
+                           <td>{{ master_agent.last_contact ?? '-' }}</td>
+                        </tr>
+                     {% endif %}
+                     <tr>
+                        <th>{{ __('Deliveries awaiting retry', 'pellissarisync') }}</th>
+                        <td>{{ pending_count }}</td>
+                     </tr>
+                  </tbody>
+               </table>
+
+               <div class="d-flex gap-2 flex-wrap">
+                  <form method="post" action="{{ path('/plugins/pellissarisync/front/config.form.php') }}">
+                     <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}" />
+                     <button type="submit" name="connect" value="1" class="btn btn-outline-primary">
+                        <i class="ti ti-plug-connected"></i> {{ __('Connect to the master', 'pellissarisync') }}
+                     </button>
+                  </form>
+
+                  <form method="post" action="{{ path('/plugins/pellissarisync/front/config.form.php') }}">
+                     <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}" />
+                     <button type="submit" name="ping_master" value="1" class="btn btn-outline-secondary">
+                        <i class="ti ti-wifi"></i> {{ __('Test the connection', 'pellissarisync') }}
+                     </button>
+                  </form>
+
+                  <form method="post" action="{{ path('/plugins/pellissarisync/front/config.form.php') }}">
+                     <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}" />
+                     <button type="submit" name="ensure_category" value="1" class="btn btn-outline-secondary">
+                        <i class="ti ti-category-plus"></i> {{ __('Create the default category', 'pellissarisync') }}
+                     </button>
+                  </form>
+
+                  <form method="post" action="{{ path('/plugins/pellissarisync/front/config.form.php') }}">
+                     <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}" />
+                     <button type="submit" name="test_ticket" value="1" class="btn btn-outline-green">
+                        <i class="ti ti-ticket"></i> {{ __('Generate a test ticket', 'pellissarisync') }}
+                     </button>
+                  </form>
+               </div>
+            </div>
+         </div>
+      {% endif %}
+
+      {% if is_master %}
+         <div class="card mb-3">
+            <div class="card-header">
+               <h3 class="card-title">{{ __('Enrollment', 'pellissarisync') }}</h3>
+            </div>
+            <div class="card-body">
+               <p>{{ __('Paste this token into each agent, together with this instance URL. It is exchanged once for credentials dedicated to that agent.', 'pellissarisync') }}</p>
+
+               <div class="input-group mb-3">
+                  <input type="text" class="form-control font-monospace" readonly value="{{ enrollment_token }}" />
+               </div>
+
+               <table class="table table-sm">
+                  <tbody>
+                     <tr>
+                        <th>{{ __('Registered agents', 'pellissarisync') }}</th>
+                        <td>{{ agents_count }}</td>
+                     </tr>
+                     <tr>
+                        <th>{{ __('Mirrored tickets', 'pellissarisync') }}</th>
+                        <td>{{ status.mirrored }}</td>
+                     </tr>
+                     <tr>
+                        <th>{{ __('Deliveries awaiting retry', 'pellissarisync') }}</th>
+                        <td>{{ pending_count }}</td>
+                     </tr>
+                  </tbody>
+               </table>
+
+               <div class="d-flex gap-2 flex-wrap">
+                  <form method="post" action="{{ path('/plugins/pellissarisync/front/config.form.php') }}"
+                        onsubmit="return confirm('{{ __('Generate a new enrollment token?', 'pellissarisync')|e('js') }}');">
+                     <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}" />
+                     <button type="submit" name="regen_token" value="1" class="btn btn-outline-danger">
+                        <i class="ti ti-refresh"></i> {{ __('Regenerate the token', 'pellissarisync') }}
+                     </button>
+                  </form>
+
+                  <form method="post" action="{{ path('/plugins/pellissarisync/front/config.form.php') }}">
+                     <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}" />
+                     <button type="submit" name="ensure_category" value="1" class="btn btn-outline-secondary">
+                        <i class="ti ti-category-plus"></i> {{ __('Create the default category', 'pellissarisync') }}
+                     </button>
+                  </form>
+
+                  <a class="btn btn-outline-primary" href="{{ path('/plugins/pellissarisync/front/agent.php') }}">
+                     <i class="ti ti-list"></i> {{ __('Manage agents', 'pellissarisync') }}
+                  </a>
+               </div>
+            </div>
+         </div>
+      {% endif %}
+   </div>
+
+   <div class="col-12 col-xl-4">
+      <div class="card">
+         <div class="card-header">
+            <h3 class="card-title">{{ __('This instance', 'pellissarisync') }}</h3>
+         </div>
+         <div class="card-body">
+            <table class="table table-sm">
+               <tbody>
+                  <tr>
+                     <th>{{ __('Identifier', 'pellissarisync') }}</th>
+                     <td class="font-monospace">{{ local_uuid }}</td>
+                  </tr>
+                  <tr>
+                     <th>{{ __('GLPI version') }}</th>
+                     <td>{{ status.glpi_version }}</td>
+                  </tr>
+                  <tr>
+                     <th>{{ __('Plugin version', 'pellissarisync') }}</th>
+                     <td>{{ status.plugin_version }}</td>
+                  </tr>
+               </tbody>
+            </table>
+         </div>
+      </div>
+   </div>
+</div>

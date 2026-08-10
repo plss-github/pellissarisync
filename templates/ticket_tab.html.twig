@@ -1,0 +1,51 @@
+<div class="card">
+   <div class="card-body">
+      <table class="table table-sm">
+         <tbody>
+            <tr>
+               <th style="width: 30%">{{ __('Peer', 'pellissarisync') }}</th>
+               <td>
+                  {% if agent %}
+                     {{ agent_name }}
+                     {% if agent.url %}
+                        <div class="text-muted small">{{ agent.url }}</div>
+                     {% endif %}
+                  {% else %}
+                     -
+                  {% endif %}
+               </td>
+            </tr>
+            <tr>
+               <th>{{ __('Customer', 'pellissarisync') }}</th>
+               <td>{{ mirror.client_name }}</td>
+            </tr>
+            <tr>
+               <th>{{ __('Remote ticket', 'pellissarisync') }}</th>
+               <td>
+                  {% if mirror.remote_tickets_id %}
+                     #{{ mirror.remote_tickets_id }}
+                  {% else %}
+                     <span class="badge bg-orange">{{ __('not acknowledged yet', 'pellissarisync') }}</span>
+                  {% endif %}
+               </td>
+            </tr>
+            <tr>
+               <th>{{ __('Content owner', 'pellissarisync') }}</th>
+               <td>{{ origin_label }}</td>
+            </tr>
+         </tbody>
+      </table>
+
+      {% if is_owner %}
+         <div class="alert alert-success mb-0">
+            <i class="ti ti-pencil"></i>
+            {{ __('This side owns the title and description: changes made here are propagated to the peer.', 'pellissarisync') }}
+         </div>
+      {% else %}
+         <div class="alert alert-warning mb-0">
+            <i class="ti ti-lock"></i>
+            {{ __('The peer owns the title and description. Editing them here stays local and is never propagated, to protect the originating data. Status changes and your own followups are still synchronized.', 'pellissarisync') }}
+         </div>
+      {% endif %}
+   </div>
+</div>

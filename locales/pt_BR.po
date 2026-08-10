@@ -1,0 +1,410 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: pellissarisync 1.0.0\n"
+"PO-Revision-Date: 2026-08-10 15:00-0300\n"
+"Last-Translator: Pellissari - Fluídez Digital\n"
+"Language-Team: pt_BR\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: pt_BR\n"
+"MIME-Version: 1.0\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+
+msgid "Pellissari Sync"
+msgstr "Pellissari Sync"
+
+# --- roles / configuration -------------------------------------------------
+
+msgid "Role"
+msgstr "Papel"
+
+msgid "Role of this instance"
+msgstr "Papel desta instância"
+
+msgid "Not configured"
+msgstr "Não configurado"
+
+msgid "Agent (customer instance)"
+msgstr "Agent (instância do cliente)"
+
+msgid "Master (support desk)"
+msgstr "Master (central de suporte)"
+
+msgid ""
+"The agent runs at the customer and owns the tickets it opens. The master is "
+"the Pellissari support desk. The plugin stays inactive until a role is chosen."
+msgstr ""
+"O agent roda no cliente e é o dono dos chamados que abre. O master é a "
+"central de suporte da Pellissari. O plugin fica inativo até que um papel seja "
+"escolhido."
+
+msgid "Choose whether this instance acts as an agent or as the master."
+msgstr "Escolha se esta instância atua como agent ou como master."
+
+msgid "Configuration saved."
+msgstr "Configuração salva."
+
+msgid "This instance"
+msgstr "Esta instância"
+
+msgid "Identifier"
+msgstr "Identificador"
+
+msgid "Plugin version"
+msgstr "Versão do plugin"
+
+msgid "Mirroring"
+msgstr "Espelhamento"
+
+msgid "Title prefix"
+msgstr "Prefixo do título"
+
+msgid "{client} is replaced by the customer name reported by the agent."
+msgstr "{client} é substituído pelo nome do cliente informado pelo agent."
+
+msgid "Category used for mirrored tickets"
+msgstr "Categoria usada para os chamados espelhados"
+
+msgid "Category that triggers mirroring"
+msgstr "Categoria que dispara o espelhamento"
+
+msgid "Create the default category"
+msgstr "Criar a categoria padrão"
+
+msgid "Category created and selected."
+msgstr "Categoria criada e selecionada."
+
+msgid "Could not create the category."
+msgstr "Não foi possível criar a categoria."
+
+msgid "Select the synchronized category first."
+msgstr "Selecione primeiro a categoria sincronizada."
+
+# --- connection / enrollment ----------------------------------------------
+
+msgid "Connection to the master"
+msgstr "Conexão com o master"
+
+msgid "Connect to the master"
+msgstr "Conectar ao master"
+
+msgid "Connected to the master."
+msgstr "Conectado ao master."
+
+msgid "Connect to the master first."
+msgstr "Conecte-se ao master primeiro."
+
+msgid "Connect to the master before generating a test ticket."
+msgstr "Conecte-se ao master antes de gerar um chamado de teste."
+
+msgid "Master URL"
+msgstr "URL do master"
+
+msgid "Base URL of the support desk GLPI, for example http://glpi-master"
+msgstr "URL base do GLPI da central de suporte, por exemplo http://glpi-master"
+
+msgid "URL of this instance"
+msgstr "URL desta instância"
+
+msgid "How the master reaches this agent. Leave empty to use the GLPI base URL."
+msgstr ""
+"Como o master alcança este agent. Deixe vazio para usar a URL base do GLPI."
+
+msgid "Enrollment"
+msgstr "Registro"
+
+msgid "Enrollment token"
+msgstr "Token de registro"
+
+msgid ""
+"Copied from the master configuration screen. Used once to obtain dedicated "
+"credentials."
+msgstr ""
+"Copiado da tela de configuração do master. Usado uma única vez para obter "
+"credenciais dedicadas."
+
+msgid ""
+"Paste this token into each agent, together with this instance URL. It is "
+"exchanged once for credentials dedicated to that agent."
+msgstr ""
+"Cole este token em cada agent, junto com a URL desta instância. Ele é trocado "
+"uma única vez por credenciais dedicadas àquele agent."
+
+msgid "Regenerate the token"
+msgstr "Regerar o token"
+
+msgid "Generate a new enrollment token?"
+msgstr "Gerar um novo token de registro?"
+
+msgid ""
+"A new enrollment token was generated. Existing agents keep working; new ones "
+"must use it."
+msgstr ""
+"Um novo token de registro foi gerado. Os agents existentes continuam "
+"funcionando; os novos devem usar este token."
+
+msgid "The master returned an incomplete response."
+msgstr "O master devolveu uma resposta incompleta."
+
+msgid "Set the master URL and the enrollment token first."
+msgstr "Informe primeiro a URL do master e o token de registro."
+
+msgid "This instance is not configured as an agent."
+msgstr "Esta instância não está configurada como agent."
+
+msgid "Pellissari support desk"
+msgstr "Central de suporte Pellissari"
+
+# --- link status -----------------------------------------------------------
+
+msgid "Link status"
+msgstr "Situação do vínculo"
+
+msgid "Handshake"
+msgstr "Handshake"
+
+msgid "Last handshake"
+msgstr "Último handshake"
+
+msgid "Linked"
+msgstr "Vinculado"
+
+msgid "Pending"
+msgstr "Pendente"
+
+msgid "Revoked"
+msgstr "Revogado"
+
+msgid "Unknown"
+msgstr "Desconhecido"
+
+msgid "Never connected"
+msgstr "Nunca conectado"
+
+msgid "Awaiting customer association"
+msgstr "Aguardando associação ao cliente"
+
+msgid "Awaiting customer association on the master"
+msgstr "Aguardando associação ao cliente no master"
+
+msgid "Not associated"
+msgstr "Não associado"
+
+msgid "State"
+msgstr "Situação"
+
+msgid "Last contact"
+msgstr "Último contato"
+
+msgid "Last HTTP status"
+msgstr "Último status HTTP"
+
+msgid "Master version"
+msgstr "Versão do master"
+
+msgid "Remote versions"
+msgstr "Versões remotas"
+
+# --- agents ----------------------------------------------------------------
+
+msgid "Synchronized agents"
+msgstr "Agents sincronizados"
+
+msgid "Manage agents"
+msgstr "Gerenciar agents"
+
+msgid "Registered agents"
+msgstr "Agents registrados"
+
+msgid "Agent URL"
+msgstr "URL do agent"
+
+msgid "Used by the master to reach the agent for pings and pushes."
+msgstr "Usada pelo master para alcançar o agent em pings e envios."
+
+msgid "Agent updated."
+msgstr "Agent atualizado."
+
+msgid "Agent revoked."
+msgstr "Agent revogado."
+
+msgid "Revoke"
+msgstr "Revogar"
+
+msgid "Revoke this agent? Synchronization stops in both directions."
+msgstr "Revogar este agent? A sincronização para nos dois sentidos."
+
+msgid "Customer"
+msgstr "Cliente"
+
+msgid "Customer name"
+msgstr "Nome do cliente"
+
+msgid "Customer entity"
+msgstr "Entidade do cliente"
+
+msgid "Mirrored tickets from this agent are created in this entity."
+msgstr "Os chamados espelhados deste agent são criados nesta entidade."
+
+msgid "Used in the [Customer] title prefix. Reported by the agent during the handshake."
+msgstr ""
+"Usado no prefixo [Cliente] do título. Informado pelo agent durante o "
+"handshake."
+
+msgid ""
+"No agent has connected yet. Copy the enrollment token from the configuration "
+"screen into an agent and press \"Connect to the master\" there."
+msgstr ""
+"Nenhum agent se conectou ainda. Copie o token de registro da tela de "
+"configuração para um agent e clique em \"Conectar ao master\" nele."
+
+msgid "This screen is only meaningful on the master instance."
+msgstr "Esta tela só faz sentido na instância master."
+
+msgid "Peer"
+msgstr "Ponta remota"
+
+# --- ping ------------------------------------------------------------------
+
+msgid "Ping"
+msgstr "Ping"
+
+msgid "Test the connection"
+msgstr "Testar a conexão"
+
+msgid "Ping failed: %s"
+msgstr "Ping falhou: %s"
+
+msgid "Ping OK - remote role %s, GLPI %s, plugin %s, %d mirrored tickets."
+msgstr "Ping OK - papel remoto %s, GLPI %s, plugin %s, %d chamados espelhados."
+
+msgid "This agent has not reported a URL yet."
+msgstr "Este agent ainda não informou uma URL."
+
+# --- mirrors ---------------------------------------------------------------
+
+msgid "Mirrored tickets"
+msgstr "Chamados espelhados"
+
+msgid "No ticket has been mirrored yet."
+msgstr "Nenhum chamado foi espelhado ainda."
+
+msgid "Local ticket"
+msgstr "Chamado local"
+
+msgid "Remote ticket"
+msgstr "Chamado remoto"
+
+msgid "not acknowledged yet"
+msgstr "ainda não confirmado"
+
+msgid "Content owner"
+msgstr "Dono do conteúdo"
+
+msgid "Customer (agent)"
+msgstr "Cliente (agent)"
+
+msgid "Customer instance (agent)"
+msgstr "Instância do cliente (agent)"
+
+msgid "Support desk (master)"
+msgstr "Central de suporte (master)"
+
+msgid "Tickets"
+msgstr "Chamados"
+
+msgid "This side owns the title and description: changes made here are propagated to the peer."
+msgstr ""
+"Este lado é o dono do título e da descrição: as alterações feitas aqui são "
+"propagadas para a outra ponta."
+
+msgid ""
+"The peer owns the title and description. Editing them here stays local and is "
+"never propagated, to protect the originating data. Status changes and your own "
+"followups are still synchronized."
+msgstr ""
+"A outra ponta é a dona do título e da descrição. Editá-los aqui fica apenas "
+"local e nunca é propagado, para proteger os dados de origem. Mudanças de "
+"status e os seus próprios acompanhamentos continuam sincronizados."
+
+# --- queue / cron ----------------------------------------------------------
+
+msgid "Deliveries awaiting retry"
+msgstr "Entregas aguardando nova tentativa"
+
+msgid "deliveries awaiting retry"
+msgstr "entregas aguardando nova tentativa"
+
+msgid "Retry pending mirror deliveries"
+msgstr "Reenviar entregas pendentes do espelhamento"
+
+msgid "Maximum number of deliveries per run"
+msgstr "Número máximo de entregas por execução"
+
+msgid "Purge the mirror idempotency ledger"
+msgstr "Limpar o registro de idempotência do espelhamento"
+
+msgid "Retention in days"
+msgstr "Retenção em dias"
+
+# --- test ticket -----------------------------------------------------------
+
+msgid "Generate a test ticket"
+msgstr "Gerar chamado de teste"
+
+msgid "[TEST] Pellissari Sync connectivity check - %s"
+msgstr "[TESTE] Verificação de conectividade Pellissari Sync - %s"
+
+msgid ""
+"Ticket generated from the Pellissari Sync configuration screen to validate "
+"mirroring. It can be closed."
+msgstr ""
+"Chamado gerado pela tela de configuração do Pellissari Sync para validar o "
+"espelhamento. Pode ser encerrado."
+
+msgid "Test ticket %d created and queued for mirroring."
+msgstr "Chamado de teste %d criado e enfileirado para espelhamento."
+
+msgid "Could not create the test ticket."
+msgstr "Não foi possível criar o chamado de teste."
+
+msgid "Ticket %d was created but not queued for mirroring - check the category and the peer link."
+msgstr ""
+"O chamado %d foi criado mas não foi enfileirado para espelhamento - verifique "
+"a categoria e o vínculo com a outra ponta."
+
+# --- content header (already Portuguese in source, kept for completeness) ---
+
+msgid "Autor:"
+msgstr "Autor:"
+
+msgid "Data de criação:"
+msgstr "Data de criação:"
+
+msgid "Data de modificação:"
+msgstr "Data de modificação:"
+
+msgid "Solução"
+msgstr "Solução"
+
+# --- plurals ---------------------------------------------------------------
+
+msgid "Synchronized instance"
+msgid_plural "Synchronized instances"
+msgstr[0] "Instância sincronizada"
+msgstr[1] "Instâncias sincronizadas"
+
+msgid "Mirrored ticket"
+msgid_plural "Mirrored tickets"
+msgstr[0] "Chamado espelhado"
+msgstr[1] "Chamados espelhados"
+
+msgid "Mirrored followup"
+msgid_plural "Mirrored followups"
+msgstr[0] "Acompanhamento espelhado"
+msgstr[1] "Acompanhamentos espelhados"
+
+msgid "Mirrored document"
+msgid_plural "Mirrored documents"
+msgstr[0] "Documento espelhado"
+msgstr[1] "Documentos espelhados"

@@ -1,0 +1,118 @@
+{% import 'components/form/fields_macros.html.twig' as fields %}
+
+{% set status_options = {
+    'pending': __('Pending', 'pellissarisync'),
+    'linked': __('Linked', 'pellissarisync'),
+    'revoked': __('Revoked', 'pellissarisync')
+} %}
+
+<div class="row">
+   <div class="col-12 col-xl-8">
+      <form method="post" action="{{ path('/plugins/pellissarisync/front/agent.form.php') }}">
+         <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}" />
+         <input type="hidden" name="id" value="{{ agent.id }}" />
+
+         <div class="card">
+            <div class="card-header">
+               <h3 class="card-title">{{ agent.name }}</h3>
+            </div>
+            <div class="card-body">
+               {{ fields.textField('name', agent.name, __('Name')) }}
+
+               {{ fields.dropdownField('Entity', 'entities_id', agent.entities_id, __('Customer entity', 'pellissarisync'), {
+                  'display_emptychoice': true,
+                  'helper': __('Mirrored tickets from this agent are created in this entity.', 'pellissarisync')
+               }) }}
+
+               {{ fields.textField('client_name', agent.client_name, __('Customer name', 'pellissarisync'), {
+                  'helper': __('Used in the [Customer] title prefix. Reported by the agent during the handshake.', 'pellissarisync')
+               }) }}
+
+               {{ fields.textField('url', agent.url, __('Agent URL', 'pellissarisync'), {
+                  'helper': __('Used by the master to reach the agent for pings and pushes.', 'pellissarisync')
+               }) }}
+
+               {{ fields.dropdownArrayField('link_status', agent.link_status, status_options, __('Link status', 'pellissarisync'), {
+                  'display_emptychoice': false
+               }) }}
+
+               {{ fields.checkboxField('is_active', agent.is_active, __('Active')) }}
+
+               {{ fields.textareaField('comment', agent.comment, __('Comments')) }}
+            </div>
+            <div class="card-footer text-center">
+               {% if can_edit %}
+                  <button type="submit" name="update" value="1" class="btn btn-primary">
+                     <i class="ti ti-device-floppy"></i> {{ __('Save') }}
+                  </button>
+               {% endif %}
+            </div>
+         </div>
+      </form>
+   </div>
+
+   <div class="col-12 col-xl-4">
+      <div class="card mb-3">
+         <div class="card-header">
+            <h3 class="card-title">{{ __('State', 'pellissarisync') }}</h3>
+         </div>
+         <div class="card-body">
+            <table class="table table-sm">
+               <tbody>
+                  <tr>
+                     <th>{{ __('Identifier', 'pellissarisync') }}</th>
+                     <td class="font-monospace small">{{ agent.uuid }}</td>
+                  </tr>
+                  <tr>
+                     <th>{{ __('Mirrored tickets', 'pellissarisync') }}</th>
+                     <td>{{ tickets }}</td>
+                  </tr>
+                  <tr>
+                     <th>{{ __('Last contact', 'pellissarisync') }}</th>
+                     <td>{{ agent.last_contact ?? '-' }}</td>
+                  </tr>
+                  <tr>
+                     <th>{{ __('Last HTTP status', 'pellissarisync') }}</th>
+                     <td>{{ agent.last_ping_status ?: '-' }}</td>
+                  </tr>
+                  {% if agent.last_error %}
+                     <tr>
+                        <th>{{ __('Last error') }}</th>
+                        <td class="text-danger small">{{ agent.last_error }}</td>
+                     </tr>
+                  {% endif %}
+                  <tr>
+                     <th>{{ __('Remote versions', 'pellissarisync') }}</th>
+                     <td class="small">
+                        {% if agent.remote_glpi_version %}
+                           GLPI {{ agent.remote_glpi_version }} / {{ agent.remote_plugin_version }}
+                        {% else %}
+                           -
+                        {% endif %}
+                     </td>
+                  </tr>
+               </tbody>
+            </table>
+
+            {% if can_edit %}
+               <div class="d-flex gap-2 flex-wrap">
+                  <form method="post" action="{{ path('/plugins/pellissarisync/front/agent.form.php') }}">
+                     <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}" />
+                     <button type="submit" name="ping" value="{{ agent.id }}" class="btn btn-outline-primary">
+                        <i class="ti ti-wifi"></i> {{ __('Ping', 'pellissarisync') }}
+                     </button>
+                  </form>
+
+                  <form method="post" action="{{ path('/plugins/pellissarisync/front/agent.form.php') }}"
+                        onsubmit="return confirm('{{ __('Revoke this agent? Synchronization stops in both directions.', 'pellissarisync')|e('js') }}');">
+                     <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}" />
+                     <button type="submit" name="revoke" value="{{ agent.id }}" class="btn btn-outline-danger">
+                        <i class="ti ti-plug-connected-x"></i> {{ __('Revoke', 'pellissarisync') }}
+                     </button>
+                  </form>
+               </div>
+            {% endif %}
+         </div>
+      </div>
+   </div>
+</div>

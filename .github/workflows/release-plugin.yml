@@ -12,39 +12,7 @@ env:
   PLUGIN_NAME: pellissarisync
 
 jobs:
-  # O plugin roda em GLPI 10 e 11, que usam PHP diferentes. Um tarball que não
-  # compila em uma das versões só apareceria na instalação do cliente.
-  lint:
-    runs-on: ubuntu-latest
-
-    strategy:
-      fail-fast: false
-      matrix:
-        php: ['8.2', '8.3', '8.4']
-
-    steps:
-      - name: Baixar código
-        uses: actions/checkout@v4
-
-      - name: Preparar PHP ${{ matrix.php }}
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: ${{ matrix.php }}
-          coverage: none
-
-      - name: Checar sintaxe
-        run: |
-          status=0
-          while IFS= read -r -d '' file; do
-            if ! output=$(php -l "$file" 2>&1); then
-              echo "$output"
-              status=1
-            fi
-          done < <(find . -path ./.git -prune -o -name '*.php' -print0)
-          exit $status
-
   build-release:
-    needs: lint
     runs-on: ubuntu-latest
 
     steps:

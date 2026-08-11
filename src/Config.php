@@ -53,6 +53,15 @@ final class Config
             // Master side
             'mirror_itilcategories_id' => 0,
             'title_prefix_template'    => '[{client}]',
+            // Default assignees for an inbound mirrored ticket, as comma-separated
+            // ids. Overridden per agent when that agent has its own.
+            'default_assign_users'     => '',
+            'default_assign_groups'    => '',
+            // Business rules on inbound mirrored tickets. On by default on the
+            // master: the support desk wants its routing, SLA and assignment rules
+            // to see a customer ticket like any other. Off on an agent, where a
+            // mirrored ticket is a copy of something the desk already processed.
+            'run_business_rules'       => 1,
             // Attachments travel base64-encoded inside the payload, so an upper
             // bound keeps a huge file from exhausting memory on either end.
             'max_document_bytes'       => 10 * 1024 * 1024,
@@ -164,6 +173,71 @@ final class Config
         return (int) (self::isMaster()
             ? self::get('mirror_itilcategories_id', 0)
             : self::get('trigger_itilcategories_id', 0));
+    }
+
+    /**
+     * Whether the local business rules must run when a mirrored ticket is applied.
+     *
+     * Only ever true on the master: on an agent the ticket is a copy of something
+     * the desk already routed, and letting the customer's rules rewrite it would
+     * make the two ends disagree.
+     */
+    public static function runBusinessRules(): bool
+    {
+        return self::isMaster() && (int) self::get('run_business_rules', 1) === 1;
+    }
+
+    /**
+     * Default assignees, as ids.
+     *
+     * @return array{users: list<int>, groups: list<int>}
+     */
+    public static function defaultAssignees(): array
+    {
+        return [
+            'users'  => self::idList((string) self::get('default_assign_users', '')),
+            'groups' => self::idList((string) self::get('default_assign_groups', '')),
+        ];
+    }
+
+    /**
+     * Parses a stored id list, dropping anything that is not a positive integer.
+     *
+     * @return list<int>
+     */
+    public static function idList(string $stored): array
+    {
+        $ids = [];
+
+        foreach (explode(',', $stored) as $piece) {
+            $id = (int) trim($piece);
+
+            if ($id > 0 && !in_array($id, $ids, true)) {
+                $ids[] = $id;
+            }
+        }
+
+        return $ids;
+    }
+
+    /**
+     * Serializes an id list for storage.
+     *
+     * @param array<int|string> $ids
+     */
+    public static function packIdList(array $ids): string
+    {
+        $clean = [];
+
+        foreach ($ids as $id) {
+            $id = (int) $id;
+
+            if ($id > 0 && !in_array($id, $clean, true)) {
+                $clean[] = $id;
+            }
+        }
+
+        return implode(',', $clean);
     }
 
     public static function maxDocumentBytes(): int

@@ -74,11 +74,20 @@ final class FollowupSync
     }
 
     /**
-     * A solution is mirrored as a followup flagged as such, so the customer can
-     * tell the resolution apart from an ordinary update.
+     * What the item was on the originating side.
+     *
+     * `_source` is set by the callers that deliberately land a different itemtype
+     * here -- today the approval fallback. `is_solution` covers a peer that predates
+     * real solution mirroring and still sends solutions as flagged followups.
      */
     public static function sourceOf(array $payload): string
     {
+        $declared = (string) ($payload['_source'] ?? '');
+
+        if ($declared !== '' && in_array($declared, MirrorFollowup::sources(), true)) {
+            return $declared;
+        }
+
         return !empty($payload['is_solution'])
             ? MirrorFollowup::SOURCE_SOLUTION
             : MirrorFollowup::SOURCE_FOLLOWUP;

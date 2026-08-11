@@ -10,6 +10,8 @@ if (!defined('GLPI_ROOT')) {
 
 use Glpi\Application\View\TemplateRenderer;
 use GlpiPlugin\Pellissarisync\Agent;
+use GlpiPlugin\Pellissarisync\Assignees;
+use GlpiPlugin\Pellissarisync\Config;
 use GlpiPlugin\Pellissarisync\Ping;
 use GlpiPlugin\Pellissarisync\Schema;
 
@@ -38,6 +40,9 @@ if (isset($_POST['update'])) {
             'is_active'   => (int) ($_POST['is_active'] ?? 0),
             'link_status' => $status,
             'comment'     => (string) ($_POST['comment'] ?? ''),
+            // Empty means "use the global default", not "nobody".
+            'assign_users'  => Config::packIdList((array) ($_POST['assign_users'] ?? [])),
+            'assign_groups' => Config::packIdList((array) ($_POST['assign_groups'] ?? [])),
         ]);
 
         Session::addMessageAfterRedirect(__s('Agent updated.', 'pellissarisync'), true, INFO);
@@ -96,6 +101,17 @@ TemplateRenderer::getInstance()->display('@pellissarisync/agent_form.html.twig',
     'agent'    => $agent->fields,
     'tickets'  => $agent->countTickets(),
     'can_edit' => Session::haveRight(Schema::RIGHT_AGENT, UPDATE),
+    // Same pickers as the global screen, see Assignees.
+    'assign_users_field'  => Assignees::usersDropdown(
+        'assign_users',
+        Config::idList((string) ($agent->fields['assign_users'] ?? ''))
+    ),
+    'assign_groups_field' => Assignees::groupsDropdown(
+        'assign_groups',
+        Config::idList((string) ($agent->fields['assign_groups'] ?? ''))
+    ),
+    'uses_global_assignment' => Config::idList((string) ($agent->fields['assign_users'] ?? '')) === []
+        && Config::idList((string) ($agent->fields['assign_groups'] ?? '')) === [],
 ]);
 
 Html::footer();

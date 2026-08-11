@@ -21,18 +21,31 @@ final class Marker
      *
      * `_auto_import` is the canonical "automated importer" flag: it skips ticket
      * template mandatory-field validation and the users_id_recipient auto-set.
-     * Business rules and entity auto-assign are skipped as well, so that the
-     * master's rules cannot silently re-route a mirrored ticket.
+     *
+     * `_skip_auto_assign` stays on regardless: that is the entity auto-assignment,
+     * and a mirrored ticket's entity is the customer binding, not a guess.
+     *
+     * @param bool $withRules true lets the local business rules see the ticket. Used
+     *                        by the master, where a customer ticket must be routed,
+     *                        assigned and given an SLA like any other. Rules can
+     *                        rewrite fields, so the caller is responsible for
+     *                        re-checking whatever must not change -- see
+     *                        TicketSync::protectEntity().
      */
-    public static function ticketFlags(): array
+    public static function ticketFlags(bool $withRules = false): array
     {
-        return [
+        $flags = [
             self::KEY            => true,
             '_auto_import'       => true,
-            '_skip_rules'        => true,
             '_skip_auto_assign'  => true,
             '_no_message'        => true,
         ];
+
+        if (!$withRules) {
+            $flags['_skip_rules'] = true;
+        }
+
+        return $flags;
     }
 
     /**
@@ -47,6 +60,30 @@ final class Marker
             '_do_not_compute_status'  => true,
             '_no_reopen'              => true,
             '_no_message'             => true,
+        ];
+    }
+
+    /**
+     * A task, a cost or an approval carries the same risk as a followup: core
+     * recomputes the parent ticket after writing it.
+     */
+    public static function timelineFlags(): array
+    {
+        return self::followupFlags();
+    }
+
+    /**
+     * Adding an actor can move the ticket to "assigned" and notify, neither of
+     * which may be a side effect of mirroring.
+     */
+    public static function actorFlags(): array
+    {
+        return [
+            self::KEY                => true,
+            '_do_not_compute_status' => true,
+            '_no_reopen'             => true,
+            '_no_message'            => true,
+            '_disablenotif'          => true,
         ];
     }
 

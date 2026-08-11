@@ -66,6 +66,31 @@
                   {{ fields.textField('title_prefix_template', config.title_prefix_template, __('Title prefix', 'pellissarisync'), {
                      'helper': __('{client} is replaced by the customer name reported by the agent.', 'pellissarisync')
                   }) }}
+
+                  {{ fields.checkboxField('run_business_rules', config.run_business_rules, __('Run the business rules on mirrored tickets', 'pellissarisync'), {
+                     'helper': __('A customer ticket is then routed, assigned and given an SLA like any other. The customer entity is always preserved, even if a rule tries to change it.', 'pellissarisync')
+                  }) }}
+               </div>
+            </div>
+
+            <div class="card mb-3">
+               <div class="card-header">
+                  <h3 class="card-title">{{ __('Default assignment', 'pellissarisync') }}</h3>
+               </div>
+               <div class="card-body">
+                  <p class="text-muted">
+                     {{ __('Applied to every ticket arriving from an agent that has no assignment of its own. Set it per customer on the agent screen.', 'pellissarisync') }}
+                  </p>
+
+                  <div class="row mb-3">
+                     <label class="col-form-label col-xxl-4 text-xxl-end">{{ __('Assigned to technicians', 'pellissarisync') }}</label>
+                     <div class="col-xxl-8 field-container">{{ assign_users_field|raw }}</div>
+                  </div>
+
+                  <div class="row mb-3">
+                     <label class="col-form-label col-xxl-4 text-xxl-end">{{ __('Assigned to groups', 'pellissarisync') }}</label>
+                     <div class="col-xxl-8 field-container">{{ assign_groups_field|raw }}</div>
+                  </div>
                </div>
             </div>
          {% endif %}

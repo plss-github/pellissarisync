@@ -20,10 +20,25 @@ final class Envelope
     public const ACTION_TICKET_CREATE  = 'ticket.create';
     public const ACTION_TICKET_CONTENT = 'ticket.content.update';
     public const ACTION_TICKET_STATUS  = 'ticket.status.update';
+    public const ACTION_TICKET_ACTORS  = 'ticket.actors.update';
+    public const ACTION_TICKET_DELETE  = 'ticket.delete';
+    public const ACTION_TICKET_RESTORE = 'ticket.restore';
     public const ACTION_FUP_CREATE     = 'followup.create';
     public const ACTION_FUP_UPDATE     = 'followup.update';
     public const ACTION_DOC_CREATE     = 'document.create';
+    public const ACTION_SOL_CREATE     = 'solution.create';
+    public const ACTION_TASK_CREATE    = 'task.create';
+    public const ACTION_TASK_UPDATE    = 'task.update';
+    public const ACTION_COST_CREATE    = 'cost.create';
+    public const ACTION_COST_UPDATE    = 'cost.update';
+    public const ACTION_VAL_CREATE     = 'validation.create';
+    public const ACTION_VAL_UPDATE     = 'validation.update';
 
+    /**
+     * ACTION_FUP_CREATE still carries solutions coming from a peer that predates
+     * ACTION_SOL_CREATE (they arrived flagged `is_solution`), so it must keep
+     * being accepted even though this end no longer emits solutions that way.
+     */
     public static function actions(): array
     {
         return [
@@ -32,9 +47,19 @@ final class Envelope
             self::ACTION_TICKET_CREATE,
             self::ACTION_TICKET_CONTENT,
             self::ACTION_TICKET_STATUS,
+            self::ACTION_TICKET_ACTORS,
+            self::ACTION_TICKET_DELETE,
+            self::ACTION_TICKET_RESTORE,
             self::ACTION_FUP_CREATE,
             self::ACTION_FUP_UPDATE,
             self::ACTION_DOC_CREATE,
+            self::ACTION_SOL_CREATE,
+            self::ACTION_TASK_CREATE,
+            self::ACTION_TASK_UPDATE,
+            self::ACTION_COST_CREATE,
+            self::ACTION_COST_UPDATE,
+            self::ACTION_VAL_CREATE,
+            self::ACTION_VAL_UPDATE,
         ];
     }
 

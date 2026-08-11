@@ -16,6 +16,7 @@ if (!defined('GLPI_ROOT')) {
 use Glpi\Application\View\TemplateRenderer;
 use GlpiPlugin\Pellissarisync\Agent;
 use GlpiPlugin\Pellissarisync\ApiServer;
+use GlpiPlugin\Pellissarisync\Assignees;
 use GlpiPlugin\Pellissarisync\Config;
 use GlpiPlugin\Pellissarisync\Handshake;
 use GlpiPlugin\Pellissarisync\Outbox;
@@ -38,6 +39,12 @@ if (isset($_POST['update'])) {
         $values['trigger_itilcategories_id'] = (int) ($_POST['trigger_itilcategories_id'] ?? 0);
     } else {
         $values['mirror_itilcategories_id'] = (int) ($_POST['mirror_itilcategories_id'] ?? 0);
+        $values['run_business_rules']       = (int) ($_POST['run_business_rules'] ?? 0);
+
+        // The dropdowns post arrays; ids are stored comma-separated, as core does for
+        // the multi-value fields of a notification target.
+        $values['default_assign_users']  = Config::packIdList((array) ($_POST['default_assign_users'] ?? []));
+        $values['default_assign_groups'] = Config::packIdList((array) ($_POST['default_assign_groups'] ?? []));
     }
 
     Config::set($values);
@@ -126,6 +133,18 @@ Html::header(
 $master = Config::isAgent() ? Agent::master() : null;
 
 TemplateRenderer::getInstance()->display('@pellissarisync/config.html.twig', [
+    // The assignee pickers are built here rather than through the Twig field macros:
+    // they need `multiple`, the `own_ticket` right filter and the is_assign
+    // condition, which the generic macros do not forward, and the same call has to
+    // work on GLPI 10 and 11.
+    'assign_users_field'  => Assignees::usersDropdown(
+        'default_assign_users',
+        Config::idList((string) Config::get('default_assign_users', ''))
+    ),
+    'assign_groups_field' => Assignees::groupsDropdown(
+        'default_assign_groups',
+        Config::idList((string) Config::get('default_assign_groups', ''))
+    ),
     'config'           => Config::all(),
     'role'             => Config::role(),
     'is_master'        => Config::isMaster(),

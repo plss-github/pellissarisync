@@ -3,9 +3,14 @@
 namespace GlpiPlugin\Pellissarisync;
 
 use GlpiPlugin\Pellissarisync\Protocol\Envelope;
+use GlpiPlugin\Pellissarisync\Sync\ActorSync;
+use GlpiPlugin\Pellissarisync\Sync\CostSync;
 use GlpiPlugin\Pellissarisync\Sync\DocumentSync;
 use GlpiPlugin\Pellissarisync\Sync\FollowupSync;
+use GlpiPlugin\Pellissarisync\Sync\SolutionSync;
+use GlpiPlugin\Pellissarisync\Sync\TaskSync;
 use GlpiPlugin\Pellissarisync\Sync\TicketSync;
+use GlpiPlugin\Pellissarisync\Sync\ValidationSync;
 use GlpiPlugin\Pellissarisync\Compat;
 use Throwable;
 
@@ -112,6 +117,16 @@ final class ApiServer
             return ['status' => 422, 'body' => ['error' => $e->getMessage()]];
         }
 
+        // An apply that reports failure must not answer 200: the sender would mark the
+        // event delivered and the difference between the two ends would never be
+        // noticed again. Answering 422 keeps it in the outbox, where the retry, the
+        // eventual dead row and the log all make it visible.
+        if (array_key_exists('ok', $body) && $body['ok'] === false) {
+            Log::write('inbound apply reported failure', ['action' => $action, 'uuid' => $uuid]);
+
+            return ['status' => 422, 'body' => ['error' => 'the peer could not apply this change']];
+        }
+
         Inbox::record($agent->getID(), $idemKey, $action, $body);
 
         return ['status' => 200, 'body' => $body];
@@ -122,16 +137,78 @@ final class ApiServer
         $ticketPayload   = (array) ($payload['ticket'] ?? []);
         $followupPayload = (array) ($payload['followup'] ?? []);
         $documentPayload = (array) ($payload['document'] ?? []);
+        $itemPayload     = (array) ($payload['item'] ?? []);
 
         return match ($action) {
             Envelope::ACTION_TICKET_CREATE  => TicketSync::create($agent, $ticketPayload) + ['ok' => true],
             Envelope::ACTION_TICKET_CONTENT => self::ticketContent($agent, $ticketPayload),
             Envelope::ACTION_TICKET_STATUS  => self::ticketStatus($agent, $ticketPayload),
+            Envelope::ACTION_TICKET_ACTORS  => self::ticketActors($agent, $ticketPayload),
+            Envelope::ACTION_TICKET_DELETE  => ['ok' => TicketSync::delete(self::requireMirror($agent, $ticketPayload))],
+            Envelope::ACTION_TICKET_RESTORE => ['ok' => TicketSync::restore(self::requireMirror($agent, $ticketPayload))],
             Envelope::ACTION_FUP_CREATE     => self::followupCreate($agent, $ticketPayload, $followupPayload),
             Envelope::ACTION_FUP_UPDATE     => self::followupUpdate($agent, $ticketPayload, $followupPayload),
             Envelope::ACTION_DOC_CREATE     => self::documentCreate($agent, $ticketPayload, $documentPayload),
+            Envelope::ACTION_SOL_CREATE     => SolutionSync::create(self::requireMirror($agent, $ticketPayload), $itemPayload) + ['ok' => true],
+            Envelope::ACTION_TASK_CREATE    => TaskSync::create(self::requireMirror($agent, $ticketPayload), $itemPayload) + ['ok' => true],
+            Envelope::ACTION_TASK_UPDATE    => ['ok' => TaskSync::update(self::requireItem($agent, $ticketPayload, $itemPayload, TaskSync::ITEMTYPE), $itemPayload)],
+            Envelope::ACTION_COST_CREATE    => CostSync::create(self::requireMirror($agent, $ticketPayload), $itemPayload) + ['ok' => true],
+            Envelope::ACTION_COST_UPDATE    => ['ok' => CostSync::update(self::requireItem($agent, $ticketPayload, $itemPayload, CostSync::ITEMTYPE), $itemPayload)],
+            Envelope::ACTION_VAL_CREATE     => ValidationSync::create(self::requireMirror($agent, $ticketPayload), $itemPayload) + ['ok' => true],
+            Envelope::ACTION_VAL_UPDATE     => self::validationUpdate($agent, $ticketPayload, $itemPayload),
             default                         => ['ok' => false],
         };
+    }
+
+    private static function ticketActors(Agent $agent, array $ticketPayload): array
+    {
+        $mirror = self::requireMirror($agent, $ticketPayload);
+
+        return [
+            'ok'    => true,
+            'added' => ActorSync::apply($mirror, (array) ($ticketPayload['actors'] ?? [])),
+        ];
+    }
+
+    /**
+     * An approval answer. Unlike a task or a cost, a missing link is not an error:
+     * the approval may have landed here as a followup because no local user owns the
+     * approver's address, and then the answer lands the same way.
+     */
+    private static function validationUpdate(Agent $agent, array $ticketPayload, array $itemPayload): array
+    {
+        $mirror = self::requireMirror($agent, $ticketPayload);
+
+        $link = MirrorItem::forPeerItem(
+            $mirror->getID(),
+            ValidationSync::ITEMTYPE,
+            (int) ($itemPayload['remote_id'] ?? 0)
+        );
+
+        return ['ok' => ValidationSync::update($mirror, $link, $itemPayload)];
+    }
+
+    /**
+     * The local counterpart of a task, cost or approval the peer is editing.
+     *
+     * Resolved without filtering on `origin`: an approval answer travels from the end
+     * that answered, so the row may have been created by either side.
+     */
+    private static function requireItem(Agent $agent, array $ticketPayload, array $itemPayload, string $itemtype): MirrorItem
+    {
+        $mirror = self::requireMirror($agent, $ticketPayload);
+
+        $link = MirrorItem::forPeerItem(
+            $mirror->getID(),
+            $itemtype,
+            (int) ($itemPayload['remote_id'] ?? 0)
+        );
+
+        if ($link === null) {
+            throw new \RuntimeException(sprintf('unknown mirrored %s', $itemtype));
+        }
+
+        return $link;
     }
 
     private static function documentCreate(Agent $agent, array $ticketPayload, array $documentPayload): array

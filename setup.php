@@ -16,7 +16,7 @@ use GlpiPlugin\Pellissarisync\Config;
 use GlpiPlugin\Pellissarisync\Hook;
 use GlpiPlugin\Pellissarisync\Mirror;
 
-define('PLUGIN_PELLISSARISYNC_VERSION', '1.1.0');
+define('PLUGIN_PELLISSARISYNC_VERSION', '1.3.0');
 
 // Customers still run GLPI 10.0.x while the support desk runs 11, so both are
 // supported and may be mirrored against each other. `max` is exclusive.
@@ -143,16 +143,35 @@ function plugin_init_pellissarisync(): void
     }
 
     // Plugin::doHook() keys on the exact class name and does not walk the class
-    // hierarchy, so every itemtype must be registered separately.
+    // hierarchy, so every itemtype must be registered separately -- TicketTask
+    // rather than ITILTask, Ticket_User rather than CommonITILActor.
     $PLUGIN_HOOKS[Hooks::ITEM_ADD]['pellissarisync'] = [
-        'Ticket'        => [Hook::class, 'onTicketAdd'],
-        'ITILFollowup'  => [Hook::class, 'onFollowupAdd'],
-        'ITILSolution'  => [Hook::class, 'onSolutionAdd'],
-        'Document_Item' => [Hook::class, 'onDocumentItemAdd'],
+        'Ticket'           => [Hook::class, 'onTicketAdd'],
+        'ITILFollowup'     => [Hook::class, 'onFollowupAdd'],
+        'ITILSolution'     => [Hook::class, 'onSolutionAdd'],
+        'Document_Item'    => [Hook::class, 'onDocumentItemAdd'],
+        'TicketTask'       => [Hook::class, 'onTaskAdd'],
+        'TicketCost'       => [Hook::class, 'onCostAdd'],
+        'TicketValidation' => [Hook::class, 'onValidationAdd'],
+        'Ticket_User'      => [Hook::class, 'onActorAdd'],
     ];
 
     $PLUGIN_HOOKS[Hooks::ITEM_UPDATE]['pellissarisync'] = [
-        'Ticket'       => [Hook::class, 'onTicketUpdate'],
-        'ITILFollowup' => [Hook::class, 'onFollowupUpdate'],
+        'Ticket'           => [Hook::class, 'onTicketUpdate'],
+        'ITILFollowup'     => [Hook::class, 'onFollowupUpdate'],
+        'TicketTask'       => [Hook::class, 'onTaskUpdate'],
+        'TicketCost'       => [Hook::class, 'onCostUpdate'],
+        'TicketValidation' => [Hook::class, 'onValidationUpdate'],
+    ];
+
+    // The bin, both ways: a ticket deleted on one end must not stay open on the
+    // other. Purge is deliberately not mirrored -- destroying data on the peer is
+    // not something a mirror should be able to do.
+    $PLUGIN_HOOKS[Hooks::ITEM_DELETE]['pellissarisync'] = [
+        'Ticket' => [Hook::class, 'onTicketDelete'],
+    ];
+
+    $PLUGIN_HOOKS[Hooks::ITEM_RESTORE]['pellissarisync'] = [
+        'Ticket' => [Hook::class, 'onTicketRestore'],
     ];
 }

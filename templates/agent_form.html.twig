@@ -38,6 +38,29 @@
 
                {{ fields.checkboxField('is_active', agent.is_active, __('Active')) }}
 
+               <hr />
+
+               <h4>{{ __('Assignment for this customer', 'pellissarisync') }}</h4>
+               <p class="text-muted">
+                  {% if uses_global_assignment %}
+                     {{ __('Empty: tickets from this customer use the global default assignment.', 'pellissarisync') }}
+                  {% else %}
+                     {{ __('Tickets from this customer are assigned to these, instead of the global default.', 'pellissarisync') }}
+                  {% endif %}
+               </p>
+
+               <div class="row mb-3">
+                  <label class="col-form-label col-xxl-4 text-xxl-end">{{ __('Assigned to technicians', 'pellissarisync') }}</label>
+                  <div class="col-xxl-8 field-container">{{ assign_users_field|raw }}</div>
+               </div>
+
+               <div class="row mb-3">
+                  <label class="col-form-label col-xxl-4 text-xxl-end">{{ __('Assigned to groups', 'pellissarisync') }}</label>
+                  <div class="col-xxl-8 field-container">{{ assign_groups_field|raw }}</div>
+               </div>
+
+               <hr />
+
                {{ fields.textareaField('comment', agent.comment, __('Comments')) }}
             </div>
             <div class="card-footer text-center">

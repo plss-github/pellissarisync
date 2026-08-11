@@ -6,11 +6,19 @@ use Document;
 use Document_Item;
 use GlpiPlugin\Pellissarisync\Protocol\Envelope;
 use GlpiPlugin\Pellissarisync\Protocol\Payload;
+use GlpiPlugin\Pellissarisync\Sync\CostSync;
 use GlpiPlugin\Pellissarisync\Sync\DocumentSync;
+use GlpiPlugin\Pellissarisync\Sync\SolutionSync;
+use GlpiPlugin\Pellissarisync\Sync\TaskSync;
+use GlpiPlugin\Pellissarisync\Sync\ValidationSync;
 use ITILFollowup;
 use ITILSolution;
 use Throwable;
 use Ticket;
+use Ticket_User;
+use TicketCost;
+use TicketTask;
+use TicketValidation;
 
 /**
  * Outbound side of the mirror: turns local changes into queued events.
@@ -151,9 +159,9 @@ final class Hook
     }
 
     /**
-     * A solution travels as a followup flagged `is_solution`, so the customer sees
-     * which message was the resolution without the plugin having to create a real
-     * solution on the peer (which would fight the explicit status propagation).
+     * A solution travels as a solution: the peer creates a real ITILSolution, so it
+     * lands in the Solution tab instead of reading as one more update in the
+     * timeline.
      */
     public static function onSolutionAdd(ITILSolution $solution): void
     {
@@ -166,45 +174,220 @@ final class Hook
                 return;
             }
 
-            $tickets_id = (int) $solution->fields['items_id'];
-
-            if (Guard::isLocked(Ticket::class, $tickets_id)) {
-                return;
-            }
-
-            $mirror = Mirror::forTicket($tickets_id);
-            if ($mirror === null) {
-                return;
-            }
-
-            $agent = $mirror->getAgent();
-            if ($agent === null || !$agent->isUsable()) {
-                return;
-            }
-
-            $solutions_id = (int) $solution->getID();
-
-            $link = new MirrorFollowup();
-            $link->add([
-                'itilfollowups_id'                 => $solutions_id,
-                'remote_followups_id'              => 0,
-                'plugin_pellissarisync_mirrors_id' => $mirror->getID(),
-                'origin'                           => Config::role(),
-                'source_itemtype'                  => MirrorFollowup::SOURCE_SOLUTION,
-            ]);
-
-            $payload = [
-                'ticket'   => ['remote_id' => $tickets_id],
-                'followup' => Payload::solution($solution),
-            ];
-
-            Outbox::push(
-                $agent->getID(),
-                Envelope::ACTION_FUP_CREATE,
-                $payload,
-                self::key(Envelope::ACTION_FUP_CREATE, $solutions_id, $payload)
+            self::pushItemCreate(
+                SolutionSync::ITEMTYPE,
+                (int) $solution->getID(),
+                (int) $solution->fields['items_id'],
+                Envelope::ACTION_SOL_CREATE,
+                Payload::solution($solution)
             );
         });
+    }
+
+    /**
+     * Tasks carry the time spent, which is what makes the work visible on the other
+     * end. Private tasks never travel, same rule as private notes.
+     */
+    public static function onTaskAdd(TicketTask $task): void
+    {
+        self::safely(static function () use ($task): void {
+            if (Marker::isOwnWrite($task) || Config::role() === Config::ROLE_NONE) {
+                return;
+            }
+
+            if ((int) ($task->fields['is_private'] ?? 0) === 1) {
+                return;
+            }
+
+            self::pushItemCreate(
+                TaskSync::ITEMTYPE,
+                (int) $task->getID(),
+                (int) $task->fields['tickets_id'],
+                Envelope::ACTION_TASK_CREATE,
+                Payload::task($task)
+            );
+        });
+    }
+
+    public static function onTaskUpdate(TicketTask $task): void
+    {
+        self::safely(static function () use ($task): void {
+            if (Marker::isOwnWrite($task) || Config::role() === Config::ROLE_NONE) {
+                return;
+            }
+
+            // A task made private after the fact must stop being mirrored; the copy
+            // already on the peer is emptied rather than left behind as a leak.
+            if ((int) ($task->fields['is_private'] ?? 0) === 1) {
+                self::pushItemUpdate(
+                    TaskSync::ITEMTYPE,
+                    (int) $task->getID(),
+                    Envelope::ACTION_TASK_UPDATE,
+                    array_merge(Payload::task($task), ['content' => '', 'actiontime' => 0])
+                );
+
+                return;
+            }
+
+            self::pushItemUpdate(
+                TaskSync::ITEMTYPE,
+                (int) $task->getID(),
+                Envelope::ACTION_TASK_UPDATE,
+                Payload::task($task)
+            );
+        });
+    }
+
+    public static function onCostAdd(TicketCost $cost): void
+    {
+        self::safely(static function () use ($cost): void {
+            if (Marker::isOwnWrite($cost) || Config::role() === Config::ROLE_NONE) {
+                return;
+            }
+
+            self::pushItemCreate(
+                CostSync::ITEMTYPE,
+                (int) $cost->getID(),
+                (int) $cost->fields['tickets_id'],
+                Envelope::ACTION_COST_CREATE,
+                Payload::cost($cost)
+            );
+        });
+    }
+
+    public static function onCostUpdate(TicketCost $cost): void
+    {
+        self::safely(static function () use ($cost): void {
+            if (Marker::isOwnWrite($cost) || Config::role() === Config::ROLE_NONE) {
+                return;
+            }
+
+            self::pushItemUpdate(
+                CostSync::ITEMTYPE,
+                (int) $cost->getID(),
+                Envelope::ACTION_COST_UPDATE,
+                Payload::cost($cost)
+            );
+        });
+    }
+
+    public static function onValidationAdd(TicketValidation $validation): void
+    {
+        self::safely(static function () use ($validation): void {
+            if (Marker::isOwnWrite($validation) || Config::role() === Config::ROLE_NONE) {
+                return;
+            }
+
+            self::pushItemCreate(
+                ValidationSync::ITEMTYPE,
+                (int) $validation->getID(),
+                (int) $validation->fields['tickets_id'],
+                Envelope::ACTION_VAL_CREATE,
+                Payload::validation($validation)
+            );
+        });
+    }
+
+    /**
+     * The answer to an approval. Unlike other items this one travels from the end
+     * that ANSWERED, which is not necessarily the end that asked -- so ownership is
+     * not checked here.
+     */
+    public static function onValidationUpdate(TicketValidation $validation): void
+    {
+        self::safely(static function () use ($validation): void {
+            if (Marker::isOwnWrite($validation) || Config::role() === Config::ROLE_NONE) {
+                return;
+            }
+
+            if (!in_array('status', $validation->updates, true)
+                && !in_array('comment_validation', $validation->updates, true)
+            ) {
+                return;
+            }
+
+            self::pushItemUpdate(
+                ValidationSync::ITEMTYPE,
+                (int) $validation->getID(),
+                Envelope::ACTION_VAL_UPDATE,
+                Payload::validation($validation),
+                requireOwnership: false
+            );
+        });
+    }
+
+    /**
+     * A ticket sent to the bin on one end goes to the bin on the other.
+     */
+    public static function onTicketDelete(Ticket $ticket): void
+    {
+        self::safely(static function () use ($ticket): void {
+            self::pushTicketLifecycle($ticket, Envelope::ACTION_TICKET_DELETE);
+        });
+    }
+
+    public static function onTicketRestore(Ticket $ticket): void
+    {
+        self::safely(static function () use ($ticket): void {
+            self::pushTicketLifecycle($ticket, Envelope::ACTION_TICKET_RESTORE);
+        });
+    }
+
+    /**
+     * Requesters and technicians, pushed as a snapshot whenever one is added.
+     *
+     * A snapshot rather than a single actor because the receiving end applies the
+     * set additively: it is cheap, it is idempotent, and it repairs an actor that a
+     * failed earlier delivery never carried.
+     */
+    public static function onActorAdd(Ticket_User $link): void
+    {
+        self::safely(static function () use ($link): void {
+            if (Marker::isOwnWrite($link) || Config::role() === Config::ROLE_NONE) {
+                return;
+            }
+
+            self::pushActors((int) ($link->fields['tickets_id'] ?? 0));
+        });
+    }
+
+    /**
+     * Sends the current actor set of a mirrored ticket to the peer.
+     *
+     * Public because the inbound side calls it too: when the master applies a
+     * customer ticket, its own rules and its configured assignees add the technician
+     * in charge, and the customer is entitled to see who is handling their ticket.
+     * Only users travel -- a group has no counterpart on the other instance.
+     *
+     * @param bool $now false while applying an inbound change, where the peer does
+     *                  not know our ticket id yet -- see Outbox::defer().
+     */
+    public static function pushActors(int $tickets_id, bool $now = true): void
+    {
+        $context = self::context($tickets_id);
+        if ($context === null) {
+            return;
+        }
+
+        [, $agent] = $context;
+
+        $ticket = new Ticket();
+        if (!$ticket->getFromDB($tickets_id)) {
+            return;
+        }
+
+        $payload = [
+            'ticket' => [
+                'remote_id' => $tickets_id,
+                'actors'    => Payload::actors($ticket),
+            ],
+        ];
+
+        $key = self::key(Envelope::ACTION_TICKET_ACTORS, $tickets_id, $payload);
+
+        $now
+            ? Outbox::push($agent->getID(), Envelope::ACTION_TICKET_ACTORS, $payload, $key)
+            : Outbox::defer($agent->getID(), Envelope::ACTION_TICKET_ACTORS, $payload, $key);
     }
 
     /**
@@ -242,43 +425,86 @@ final class Hook
                 return;
             }
 
-            $documents_id = (int) $link->fields['documents_id'];
-
-            // Already known: this is the copy we just received from the peer.
-            if (MirrorDocument::forDocument($mirror->getID(), $documents_id) !== null) {
-                return;
-            }
-
-            $document = new Document();
-            if (!$document->getFromDB($documents_id)) {
-                return;
-            }
-
-            $packed = DocumentSync::pack($document);
-            if ($packed === null) {
-                return; // unreadable or too large; already logged
-            }
-
-            $record = new MirrorDocument();
-            $record->add([
-                'plugin_pellissarisync_mirrors_id' => $mirror->getID(),
-                'documents_id'                     => $documents_id,
-                'remote_documents_id'              => 0,
-                'origin'                           => Config::role(),
-            ]);
-
-            $payload = [
-                'ticket'   => ['remote_id' => $tickets_id],
-                'document' => $packed,
-            ];
-
-            Outbox::push(
-                $agent->getID(),
-                Envelope::ACTION_DOC_CREATE,
-                $payload,
-                self::key(Envelope::ACTION_DOC_CREATE, $documents_id, ['sha1' => $packed['sha1sum']])
-            );
+            self::pushDocument($agent, $mirror, (int) $link->fields['documents_id'], $tickets_id);
         });
+    }
+
+    /**
+     * Reads a local document and queues it with its bytes.
+     */
+    private static function pushDocument(Agent $agent, Mirror $mirror, int $documents_id, int $tickets_id): void
+    {
+        if ($documents_id <= 0) {
+            return;
+        }
+
+        // Already known: this is the copy we just received from the peer.
+        if (MirrorDocument::forDocument($mirror->getID(), $documents_id) !== null) {
+            return;
+        }
+
+        $document = new Document();
+        if (!$document->getFromDB($documents_id)) {
+            return;
+        }
+
+        $packed = DocumentSync::pack($document);
+        if ($packed === null) {
+            return; // unreadable or too large; already logged
+        }
+
+        $record = new MirrorDocument();
+        $record->add([
+            'plugin_pellissarisync_mirrors_id' => $mirror->getID(),
+            'documents_id'                     => $documents_id,
+            'remote_documents_id'              => 0,
+            'origin'                           => Config::role(),
+        ]);
+
+        $payload = [
+            'ticket'   => ['remote_id' => $tickets_id],
+            'document' => $packed,
+        ];
+
+        Outbox::push(
+            $agent->getID(),
+            Envelope::ACTION_DOC_CREATE,
+            $payload,
+            // The ticket belongs in the key: GLPI deduplicates documents by sha1, so
+            // the same file attached to two mirrored tickets is ONE glpi_documents
+            // row shared by both. Keyed on the document alone, the second ticket's
+            // push collapsed into the first one's key and the attachment silently
+            // never travelled.
+            self::key(Envelope::ACTION_DOC_CREATE, $documents_id, [
+                'ticket' => $tickets_id,
+                'sha1'   => $packed['sha1sum'],
+            ])
+        );
+    }
+
+    /**
+     * Attachments that were already linked when the mirror was created.
+     *
+     * A file attached while opening the ticket is stored by Ticket::post_addItem(),
+     * which core runs BEFORE the item_add hook -- so onDocumentItemAdd() fired at a
+     * moment when no mirror existed yet and skipped the file. Nothing later comes
+     * back for it, which is why the ticket arrived at the peer without its
+     * attachment while every attachment added afterwards worked. Sweeping here, once
+     * the mirror exists, is what closes that window.
+     */
+    private static function pushExistingDocuments(Agent $agent, Mirror $mirror, int $tickets_id): void
+    {
+        global $DB;
+
+        $rows = $DB->request([
+            'SELECT' => ['documents_id'],
+            'FROM'   => Document_Item::getTable(),
+            'WHERE'  => ['itemtype' => Ticket::class, 'items_id' => $tickets_id],
+        ]);
+
+        foreach ($rows as $row) {
+            self::pushDocument($agent, $mirror, (int) $row['documents_id'], $tickets_id);
+        }
     }
 
     /**
@@ -366,6 +592,129 @@ final class Hook
         });
     }
 
+    // ---------------------------------------------------------------- helpers
+
+    /**
+     * The mirror and the peer for a ticket, or null when nothing must travel:
+     * no mirror, no usable peer, or a change this plugin is itself applying.
+     *
+     * @return array{0: Mirror, 1: Agent}|null
+     */
+    private static function context(int $tickets_id): ?array
+    {
+        if ($tickets_id <= 0 || Guard::isLocked(Ticket::class, $tickets_id)) {
+            return null;
+        }
+
+        $mirror = Mirror::forTicket($tickets_id);
+        if ($mirror === null) {
+            return null;
+        }
+
+        $agent = $mirror->getAgent();
+        if ($agent === null || !$agent->isUsable()) {
+            return null;
+        }
+
+        return [$mirror, $agent];
+    }
+
+    /**
+     * Queues the creation of a timeline item that keeps its itemtype on the peer.
+     */
+    private static function pushItemCreate(
+        string $itemtype,
+        int $localId,
+        int $tickets_id,
+        string $action,
+        array $item
+    ): void {
+        $context = self::context($tickets_id);
+        if ($context === null || $localId <= 0) {
+            return;
+        }
+
+        [$mirror, $agent] = $context;
+
+        // Written before the delivery: the peer's id is only known once it answers,
+        // and Ack fills it in then.
+        MirrorItem::track($mirror->getID(), $itemtype, $localId);
+
+        $payload = [
+            'ticket' => ['remote_id' => $tickets_id],
+            'item'   => $item,
+        ];
+
+        Outbox::push($agent->getID(), $action, $payload, self::key($action, $localId, $payload));
+    }
+
+    /**
+     * Queues an edit of an item this end created.
+     *
+     * @param bool $requireOwnership false only for approval answers, which travel
+     *                               from whoever answered rather than from the end
+     *                               that created the approval.
+     */
+    private static function pushItemUpdate(
+        string $itemtype,
+        int $localId,
+        string $action,
+        array $item,
+        bool $requireOwnership = true
+    ): void {
+        $link = MirrorItem::forItem($itemtype, $localId);
+
+        if ($link === null || ($requireOwnership && !$link->isContentOwner())) {
+            return;
+        }
+
+        if (Guard::isLocked($itemtype, $localId)) {
+            return;
+        }
+
+        $mirror = $link->getMirror();
+        if ($mirror === null) {
+            return;
+        }
+
+        $context = self::context((int) $mirror->fields['tickets_id']);
+        if ($context === null) {
+            return;
+        }
+
+        [, $agent] = $context;
+
+        $payload = [
+            'ticket' => ['remote_id' => (int) $mirror->fields['tickets_id']],
+            'item'   => $item,
+        ];
+
+        Outbox::push($agent->getID(), $action, $payload, self::key($action, $localId, $payload));
+    }
+
+    /**
+     * Bin and restore, which carry no data beyond the ticket identity.
+     */
+    private static function pushTicketLifecycle(Ticket $ticket, string $action): void
+    {
+        if (Marker::isOwnWrite($ticket) || Config::role() === Config::ROLE_NONE) {
+            return;
+        }
+
+        $tickets_id = (int) $ticket->getID();
+
+        $context = self::context($tickets_id);
+        if ($context === null) {
+            return;
+        }
+
+        [, $agent] = $context;
+
+        $payload = ['ticket' => ['remote_id' => $tickets_id]];
+
+        Outbox::push($agent->getID(), $action, $payload, self::key($action, $tickets_id, $payload));
+    }
+
     // --------------------------------------------------------------- outbound
 
     /**
@@ -425,6 +774,11 @@ final class Hook
             $payload,
             self::key(Envelope::ACTION_TICKET_CREATE, $tickets_id, [])
         );
+
+        // Queued after the creation on purpose: the peer needs the mirror before it
+        // can accept anything attached to it.
+        $mirror->getFromDB($mirror->getID());
+        self::pushExistingDocuments($agent, $mirror, $tickets_id);
     }
 
     private static function pushTicketContent(Agent $agent, Ticket $ticket, Mirror $mirror): void

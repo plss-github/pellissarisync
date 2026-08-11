@@ -32,34 +32,80 @@ final class Outbox
      */
     public static function push(int $agents_id, string $action, array $payload, string $idempotencyKey): bool
     {
+        // Checked before enqueueing, so that a null from enqueue() means one thing
+        // only: the row could not be written. It used to mean both, and a failed
+        // INSERT was therefore reported as a successful push -- the event vanished
+        // without a trace in the queue or in the log.
+        if (self::isQueued($idempotencyKey)) {
+            return true;
+        }
+
         $id = self::enqueue($agents_id, $action, $payload, $idempotencyKey);
 
         if ($id === null) {
-            // Already queued or already delivered: nothing to do.
-            return true;
+            Log::write('event NOT queued: the outbox insert failed', [
+                'action' => $action,
+                'agent'  => $agents_id,
+            ]);
+
+            return false;
         }
 
         return self::deliver($id);
     }
 
     /**
-     * @return int|null the new row id, or null when the key is already known
+     * Queues an event WITHOUT trying to deliver it now.
+     *
+     * For events produced *while applying* an inbound change. The peer cannot
+     * address our ticket yet: it learns our id from the response to the delivery
+     * we are still handling, so an immediate push is guaranteed to come back as
+     * "unknown mirrored ticket". Leaving the row pending lets the cron flush send
+     * it once that round-trip has completed.
+     */
+    public static function defer(int $agents_id, string $action, array $payload, string $idempotencyKey): bool
+    {
+        if (self::isQueued($idempotencyKey)) {
+            return true;
+        }
+
+        if (self::enqueue($agents_id, $action, $payload, $idempotencyKey) === null) {
+            Log::write('event NOT queued: the outbox insert failed', [
+                'action' => $action,
+                'agent'  => $agents_id,
+            ]);
+
+            return false;
+        }
+
+        return true;
+    }
+
+    public static function isQueued(string $idempotencyKey): bool
+    {
+        return countElementsInTable(self::TABLE, ['idempotency_key' => $idempotencyKey]) > 0;
+    }
+
+    /**
+     * @return int|null the new row id, or null when the row could not be written
      */
     public static function enqueue(int $agents_id, string $action, array $payload, string $idempotencyKey): ?int
     {
         global $DB;
 
-        if (countElementsInTable(self::TABLE, ['idempotency_key' => $idempotencyKey]) > 0) {
+        if (self::isQueued($idempotencyKey)) {
             return null;
         }
 
         $now = Clock::now();
 
+        // The payload is escaped here, not by the query builder: on GLPI 10 the
+        // builder interpolates strings as-is. See Compat::escapeForDb().
         $DB->insert(self::TABLE, [
             'plugin_pellissarisync_agents_id' => $agents_id,
-            'action'                          => $action,
-            'payload'                         => Envelope::encode($payload),
-            'idempotency_key'                 => $idempotencyKey,
+            'action'                          => Compat::escapeForDb($action),
+            'payload'                         => Compat::escapeForDb(Envelope::encode($payload)),
+            'idempotency_key'                 => Compat::escapeForDb($idempotencyKey),
             'state'                           => self::STATE_PENDING,
             'tries'                           => 0,
             'next_try_date'                   => $now,
@@ -201,7 +247,7 @@ final class Outbox
             'tries'            => $tries,
             'next_try_date'    => date(Clock::FORMAT, strtotime(Clock::now()) + $delay),
             'last_status_code' => $status,
-            'last_error'       => $error,
+            'last_error'       => Compat::escapeForDb($error),
         ], ['id' => $id]);
     }
 
@@ -212,7 +258,7 @@ final class Outbox
         $values = [
             'state'            => self::STATE_DEAD,
             'last_status_code' => $status,
-            'last_error'       => $error,
+            'last_error'       => Compat::escapeForDb($error),
         ];
 
         if ($tries !== null) {

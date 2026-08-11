@@ -111,6 +111,26 @@ final class Schema
             ");
         }
 
+        $items = MirrorItem::getTable();
+        if (!$DB->tableExists($items)) {
+            // `remote` is not unique for the same reason as in the followups
+            // table: rows start with remote_items_id = 0 until the peer answers.
+            $DB->doQuery("
+                CREATE TABLE `$items` (
+                    `id`                               int $sign NOT NULL AUTO_INCREMENT,
+                    `plugin_pellissarisync_mirrors_id` int $sign NOT NULL DEFAULT '0',
+                    `itemtype`                         varchar(100) NOT NULL DEFAULT '',
+                    `items_id`                         int $sign NOT NULL DEFAULT '0',
+                    `remote_items_id`                  int $sign NOT NULL DEFAULT '0',
+                    `origin`                           varchar(10) NOT NULL DEFAULT '',
+                    `date_creation`                    timestamp NULL DEFAULT NULL,
+                    PRIMARY KEY (`id`),
+                    UNIQUE KEY `local` (`itemtype`,`items_id`),
+                    KEY `remote` (`plugin_pellissarisync_mirrors_id`,`itemtype`,`remote_items_id`,`origin`)
+                ) ENGINE=InnoDB DEFAULT CHARSET = $charset COLLATE = $collation ROW_FORMAT=DYNAMIC;
+            ");
+        }
+
         $documents = MirrorDocument::getTable();
         if (!$DB->tableExists($documents)) {
             $DB->doQuery("
@@ -134,6 +154,12 @@ final class Schema
             'value' => MirrorFollowup::SOURCE_FOLLOWUP,
             'after' => 'origin',
         ]);
+
+        // Per-customer assignment: who takes a ticket from THIS agent. Empty falls
+        // back to the global default. Stored as comma-separated ids, like core does
+        // for the multi-value fields of a notification target.
+        $migration->addField($agents, 'assign_users', 'string', ['after' => 'entities_id']);
+        $migration->addField($agents, 'assign_groups', 'string', ['after' => 'assign_users']);
 
         if (!$DB->tableExists(Outbox::TABLE)) {
             $table = Outbox::TABLE;
@@ -201,6 +227,7 @@ final class Schema
             Inbox::TABLE,
             Outbox::TABLE,
             MirrorDocument::getTable(),
+            MirrorItem::getTable(),
             MirrorFollowup::getTable(),
             Mirror::getTable(),
             Agent::getTable(),

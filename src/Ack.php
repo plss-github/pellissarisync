@@ -3,7 +3,11 @@
 namespace GlpiPlugin\Pellissarisync;
 
 use GlpiPlugin\Pellissarisync\Protocol\Envelope;
+use GlpiPlugin\Pellissarisync\Sync\CostSync;
 use GlpiPlugin\Pellissarisync\Sync\FollowupSync;
+use GlpiPlugin\Pellissarisync\Sync\SolutionSync;
+use GlpiPlugin\Pellissarisync\Sync\TaskSync;
+use GlpiPlugin\Pellissarisync\Sync\ValidationSync;
 
 /**
  * Records the ids the peer assigned to what we just pushed.
@@ -21,8 +25,42 @@ final class Ack
             Envelope::ACTION_TICKET_CREATE => self::ticketCreated($payload, $body),
             Envelope::ACTION_FUP_CREATE    => self::followupCreated($payload, $body),
             Envelope::ACTION_DOC_CREATE    => self::documentCreated($payload, $body),
+            Envelope::ACTION_SOL_CREATE    => self::itemCreated(SolutionSync::ITEMTYPE, 'itilsolutions_id', $payload, $body),
+            Envelope::ACTION_TASK_CREATE   => self::itemCreated(TaskSync::ITEMTYPE, 'tickettasks_id', $payload, $body),
+            Envelope::ACTION_COST_CREATE   => self::itemCreated(CostSync::ITEMTYPE, 'ticketcosts_id', $payload, $body),
+            Envelope::ACTION_VAL_CREATE    => self::itemCreated(ValidationSync::ITEMTYPE, 'ticketvalidations_id', $payload, $body),
             default                        => null,
         };
+    }
+
+    /**
+     * Tasks, costs, approvals and solutions all link the same way; only the key the
+     * peer answers with differs.
+     *
+     * An approval the peer could not create as an approval answers with
+     * ticketvalidations_id = 0 (it became a followup there). The link stays at 0,
+     * which is correct: there is no remote approval to address later.
+     */
+    private static function itemCreated(string $itemtype, string $responseKey, array $payload, array $body): void
+    {
+        $localId  = (int) ($payload['item']['remote_id'] ?? 0);
+        $remoteId = (int) ($body[$responseKey] ?? 0);
+
+        if ($localId <= 0 || $remoteId <= 0) {
+            return;
+        }
+
+        $link = MirrorItem::forItem($itemtype, $localId);
+        if ($link === null) {
+            return;
+        }
+
+        $link->update([
+            'id'              => $link->getID(),
+            'remote_items_id' => $remoteId,
+            '_no_history'     => true,
+            '_no_message'     => true,
+        ]);
     }
 
     private static function ticketCreated(array $payload, array $body): void

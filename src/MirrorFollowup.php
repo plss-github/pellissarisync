@@ -21,6 +21,34 @@ class MirrorFollowup extends CommonDBTM
     public const SOURCE_FOLLOWUP = 'ITILFollowup';
     public const SOURCE_SOLUTION = 'ITILSolution';
 
+    /**
+     * An approval that could not exist locally (no user owns the approver's
+     * address) and was recorded as a followup instead. Its own source value keeps
+     * it out of the followup id space: without it, remote approval #5 and remote
+     * followup #5 on the same ticket would be treated as the same object.
+     */
+    public const SOURCE_VALIDATION = 'TicketValidation';
+
+    /**
+     * The answer to such an approval, which is a second timeline entry and needs a
+     * slot of its own: keyed the same as the request, the answer would be taken for
+     * a redelivery of it and dropped.
+     */
+    public const SOURCE_VALIDATION_ANSWER = 'TicketValidation.answer';
+
+    /**
+     * @return string[]
+     */
+    public static function sources(): array
+    {
+        return [
+            self::SOURCE_FOLLOWUP,
+            self::SOURCE_SOLUTION,
+            self::SOURCE_VALIDATION,
+            self::SOURCE_VALIDATION_ANSWER,
+        ];
+    }
+
     public static function getTypeName($nb = 0)
     {
         return _n('Mirrored followup', 'Mirrored followups', $nb, 'pellissarisync');

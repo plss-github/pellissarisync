@@ -150,6 +150,27 @@ class Agent extends CommonDBTM
     }
 
     /**
+     * Who takes a ticket coming from this customer.
+     *
+     * Empty means "use the global default": an agent that was never given its own
+     * assignees must not silently end up with nobody, which is what returning an
+     * empty list unconditionally would do.
+     *
+     * @return array{users: list<int>, groups: list<int>}
+     */
+    public function assignees(): array
+    {
+        $users  = Config::idList((string) ($this->fields['assign_users'] ?? ''));
+        $groups = Config::idList((string) ($this->fields['assign_groups'] ?? ''));
+
+        if ($users === [] && $groups === []) {
+            return Config::defaultAssignees();
+        }
+
+        return ['users' => $users, 'groups' => $groups];
+    }
+
+    /**
      * Number of tickets mirrored through this agent.
      */
     public function countTickets(): int

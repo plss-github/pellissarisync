@@ -47,12 +47,17 @@ final class Inbox
             return;
         }
 
+        // Escaped here because GLPI 10's query builder interpolates strings as-is;
+        // an apostrophe in a recorded result would otherwise break the INSERT and
+        // the ledger would lose the entry that makes a replay a no-op.
         $DB->insert(self::TABLE, [
             'plugin_pellissarisync_agents_id' => $agents_id,
-            'idempotency_key'                 => $idempotencyKey,
-            'action'                          => $action,
+            'idempotency_key'                 => Compat::escapeForDb($idempotencyKey),
+            'action'                          => Compat::escapeForDb($action),
             'received_date'                   => Clock::now(),
-            'result'                          => json_encode($result, JSON_UNESCAPED_UNICODE),
+            'result'                          => Compat::escapeForDb(
+                (string) json_encode($result, JSON_UNESCAPED_UNICODE)
+            ),
         ]);
     }
 

@@ -24,27 +24,42 @@ jobs:
         run: |
           VERSION=$(grep -oP "\S*'PLUGIN_\w*_VERSION'\,\s*'\K[^']+" setup.php)
 
-          # Sem isto, uma mudança no formato do setup.php criaria uma release
-          # com tag vazia em vez de falhar.
           if [ -z "$VERSION" ]; then
             echo "::error::Não foi possível extrair a versão de setup.php"
             exit 1
           fi
 
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Criar tar.gz do repositório (ignorando .github/.git)
+      - name: Criar tar.gz do plugin
         run: |
           TAR_PATH="/tmp/${{ env.PLUGIN_NAME }}.tar.gz"
 
-          tar -czf "$TAR_PATH" \
-            --exclude=.github \
-            --exclude=.git \
-            --exclude="${{ env.PLUGIN_NAME }}.tar.gz" \
-            --transform "s|^|${{ env.PLUGIN_NAME }}/|" \
+          tar \
+            --create \
+            --gzip \
+            --file="$TAR_PATH" \
+            --exclude='./.git' \
+            --exclude='./.github' \
+            --transform="s|^\./|${{ env.PLUGIN_NAME }}/|" \
             .
 
+          echo "=== Informações do arquivo ==="
+          file "$TAR_PATH"
+
+          echo "=== Primeiros arquivos ==="
+          tar -tzf "$TAR_PATH" | head -30
+
+          echo "=== Validando gzip ==="
+          gzip -t "$TAR_PATH"
+
+          echo "=== Validando tar ==="
+          tar -tzf "$TAR_PATH" >/dev/null
+
           mv "$TAR_PATH" "./${{ env.PLUGIN_NAME }}.tar.gz"
+
+          echo "=== Artefato final ==="
+          file "./${{ env.PLUGIN_NAME }}.tar.gz"
 
       - name: Criar Release no GitHub
         uses: softprops/action-gh-release@v2

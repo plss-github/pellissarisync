@@ -61,21 +61,29 @@ final class Hook
                 return;
             }
 
-            $mirror = Mirror::forTicket($tickets_id);
-
-            if ($mirror === null) {
-                // Covers the case of a ticket moved into the synchronized
-                // category after creation.
-                self::createAndPushMirror($ticket);
-                return;
-            }
-
-            $agent = $mirror->getAgent();
-            if ($agent === null || !$agent->isUsable()) {
-                return;
-            }
-
             $updates = $ticket->updates;
+
+            if (Mirror::forTicket($tickets_id) === null) {
+                // The case this covers is a ticket MOVED into the synchronized
+                // category after creation, so that is exactly what is required
+                // here. Reacting to any update of any unmirrored ticket in the
+                // category also caught the updates core itself performs -- the
+                // status recompute inside a purge cascade, cronCloseTicket() on
+                // every solved ticket -- and each of those emitted a creation for a
+                // ticket nobody had asked to mirror, some of them already in the bin.
+                if (in_array('itilcategories_id', $updates, true)) {
+                    self::createAndPushMirror($ticket);
+                }
+
+                return;
+            }
+
+            $context = self::context($tickets_id);
+            if ($context === null) {
+                return;
+            }
+
+            [$mirror, $agent] = $context;
 
             $contentChanged = in_array('name', $updates, true) || in_array('content', $updates, true);
 
@@ -117,19 +125,12 @@ final class Hook
 
             $tickets_id = (int) $followup->fields['items_id'];
 
-            if (Guard::isLocked(Ticket::class, $tickets_id)) {
+            $context = self::context($tickets_id);
+            if ($context === null) {
                 return;
             }
 
-            $mirror = Mirror::forTicket($tickets_id);
-            if ($mirror === null) {
-                return;
-            }
-
-            $agent = $mirror->getAgent();
-            if ($agent === null || !$agent->isUsable()) {
-                return;
-            }
+            [$mirror, $agent] = $context;
 
             $followups_id = (int) $followup->getID();
 
@@ -334,6 +335,56 @@ final class Hook
     }
 
     /**
+     * Makes the whole purge cascade inert.
+     *
+     * Purge is not mirrored -- destroying data on the peer is not something a mirror
+     * may do -- but "not mirrored" has to mean handled, and it did not. Core runs
+     * cleanDBonPurge() while the ticket row still exists, and the children it
+     * destroys recompute the parent: CommonITILActor::post_deleteFromDB() sets the
+     * ticket back to INCOMING once the last assignee is gone, with core's own input
+     * and outside any of our writes. Our update hook saw a genuine status change and
+     * propagated it, which reopened the peer's copy as "new"; and when the ticket had
+     * no mirror row, the same update fell through to createAndPushMirror() and pushed
+     * a CREATION for a ticket in the middle of being destroyed.
+     *
+     * The lock is taken here and never released: it has to cover the cascade and the
+     * item_purge that follows, and the request ends right after.
+     */
+    public static function onTicketPrePurge(Ticket $ticket): void
+    {
+        self::safely(static function () use ($ticket): void {
+            Guard::lock(Ticket::class, (int) $ticket->getID());
+        });
+    }
+
+    /**
+     * Closes the local link once the ticket is gone.
+     *
+     * The peer keeps its copy and goes on addressing this ticket, so the mirror row
+     * becomes a tombstone instead of disappearing -- see Mirror::purge() and the
+     * no-op answer in ApiServer.
+     */
+    public static function onTicketPurge(Ticket $ticket): void
+    {
+        self::safely(static function () use ($ticket): void {
+            $tickets_id = (int) $ticket->getID();
+
+            $mirror = Mirror::forTicket($tickets_id);
+            if ($mirror === null || $mirror->isPurged()) {
+                return;
+            }
+
+            $mirror->purge();
+
+            Log::write('mirrored ticket purged locally; link closed, nothing propagated', [
+                'tickets_id' => $tickets_id,
+                'remote_id'  => (int) $mirror->fields['remote_tickets_id'],
+                'agent'      => (int) $mirror->fields['plugin_pellissarisync_agents_id'],
+            ]);
+        });
+    }
+
+    /**
      * Requesters and technicians, pushed as a snapshot whenever one is added.
      *
      * A snapshot rather than a single actor because the receiving end applies the
@@ -408,22 +459,15 @@ final class Hook
 
             // Decisive for attachments: Document::post_addItem() builds the
             // Document_Item with a fresh input array, so our marker is lost and
-            // isOwnWrite() cannot see that we are the ones writing. Without this
-            // guard an inbound attachment is pushed straight back and the two
-            // instances copy the file to each other forever.
-            if (Guard::isLocked(Ticket::class, $tickets_id)) {
+            // isOwnWrite() cannot see that we are the ones writing. Without the
+            // reentrancy guard context() checks, an inbound attachment is pushed
+            // straight back and the two instances copy the file to each other forever.
+            $context = self::context($tickets_id);
+            if ($context === null) {
                 return;
             }
 
-            $mirror = Mirror::forTicket($tickets_id);
-            if ($mirror === null) {
-                return;
-            }
-
-            $agent = $mirror->getAgent();
-            if ($agent === null || !$agent->isUsable()) {
-                return;
-            }
+            [$mirror, $agent] = $context;
 
             self::pushDocument($agent, $mirror, (int) $link->fields['documents_id'], $tickets_id);
         });
@@ -573,10 +617,12 @@ final class Hook
                 return;
             }
 
-            $agent = $mirror->getAgent();
-            if ($agent === null || !$agent->isUsable()) {
+            $context = self::context((int) $mirror->fields['tickets_id']);
+            if ($context === null) {
                 return;
             }
+
+            [, $agent] = $context;
 
             $payload = [
                 'ticket'   => ['remote_id' => (int) $mirror->fields['tickets_id']],
@@ -595,28 +641,56 @@ final class Hook
     // ---------------------------------------------------------------- helpers
 
     /**
-     * The mirror and the peer for a ticket, or null when nothing must travel:
-     * no mirror, no usable peer, or a change this plugin is itself applying.
+     * The mirror and the peer for a ticket, or null when nothing must travel: no
+     * mirror, no peer, a ticket in the bin, or a change this plugin is itself
+     * applying.
+     *
+     * A ticket in the bin is silent on purpose. Deletion and restore travel through
+     * their own hooks, so nothing legitimate needs to be pushed while a ticket sits
+     * there -- and everything that reached this point from a deleted ticket came from
+     * core rearranging it (a purge cascade, an automatic action), never from someone
+     * deciding to change it.
+     *
+     * The peer only has to EXIST here; whether it is usable is Outbox::deliver()'s
+     * call. A peer still pending its customer entity is the documented state of a
+     * fresh install, and dropping the event at this point lost it for good.
+     *
+     * @param bool $evenInBin true only for the bin and restore events themselves:
+     *                        core writes is_deleted BEFORE firing item_delete, so by
+     *                        the time we are told about it the ticket is already
+     *                        there, and refusing it would be refusing the very event
+     *                        that has to travel.
      *
      * @return array{0: Mirror, 1: Agent}|null
      */
-    private static function context(int $tickets_id): ?array
+    private static function context(int $tickets_id, bool $evenInBin = false): ?array
     {
         if ($tickets_id <= 0 || Guard::isLocked(Ticket::class, $tickets_id)) {
             return null;
         }
 
         $mirror = Mirror::forTicket($tickets_id);
-        if ($mirror === null) {
+        if ($mirror === null || $mirror->isPurged()) {
+            return null;
+        }
+
+        if (!$evenInBin && self::isInBin($tickets_id)) {
             return null;
         }
 
         $agent = $mirror->getAgent();
-        if ($agent === null || !$agent->isUsable()) {
+        if ($agent === null) {
             return null;
         }
 
         return [$mirror, $agent];
+    }
+
+    private static function isInBin(int $tickets_id): bool
+    {
+        $ticket = new Ticket();
+
+        return $ticket->getFromDB($tickets_id) && (int) $ticket->fields['is_deleted'] === 1;
     }
 
     /**
@@ -703,7 +777,7 @@ final class Hook
 
         $tickets_id = (int) $ticket->getID();
 
-        $context = self::context($tickets_id);
+        $context = self::context($tickets_id, evenInBin: true);
         if ($context === null) {
             return;
         }
@@ -734,14 +808,31 @@ final class Hook
             return;
         }
 
+        // A ticket in the bin must not become a live ticket on the peer. Nothing
+        // carries is_deleted in the creation payload, so the copy would arrive open,
+        // and the update that got us here was core's own doing -- a purge cascade or
+        // an automatic action -- not a decision to start mirroring this ticket.
+        if ((int) ($ticket->fields['is_deleted'] ?? 0) === 1) {
+            Log::write('mirror not created: the ticket is in the bin', [
+                'tickets_id' => $tickets_id,
+                'role'       => Config::role(),
+            ]);
+
+            return;
+        }
+
         $entities_id = (int) $ticket->fields['entities_id'];
 
         $agent = Config::isMaster()
             ? Agent::findByEntity($entities_id)
             : Agent::master();
 
-        if ($agent === null || !$agent->isUsable()) {
-            Log::write('no usable peer for ticket', [
+        // Not being usable YET is not a reason to lose the ticket: on the master an
+        // agent stays pending until an administrator binds it to a customer entity,
+        // and that is precisely when its first tickets are opened. The event is
+        // queued and Outbox::deliver() holds it back until the peer is linked.
+        if ($agent === null) {
+            Log::write('no peer for ticket', [
                 'tickets_id'  => $tickets_id,
                 'entities_id' => $entities_id,
                 'role'        => Config::role(),
@@ -755,16 +846,29 @@ final class Hook
             ? ($agent->fields['client_name'] ?: Payload::clientNameForEntity((int) $agent->fields['entities_id']))
             : Payload::clientNameForEntity($entities_id);
 
-        $mirror = new Mirror();
-        $mirror->add([
+        $mirror     = new Mirror();
+        $mirrors_id = (int) $mirror->add([
             'tickets_id'                      => $tickets_id,
             'remote_tickets_id'               => 0,
             'plugin_pellissarisync_agents_id' => $agent->getID(),
             'origin'                          => Config::role(),
             'client_name'                     => $clientName,
             'last_received_status'             => 0,
-            'sync_state'                      => 'queued',
+            'sync_state'                      => Mirror::STATE_QUEUED,
         ]);
+
+        // Without the link row the creation is undeliverable in practice: Ack cannot
+        // record the id the peer assigns, and the event can never be queued a second
+        // time either, because its idempotency key is fixed per ticket and
+        // Outbox::isQueued() collapses it forever. Better to fail loudly here.
+        if ($mirrors_id <= 0) {
+            Log::write('mirror NOT created: the link row could not be written, creation not pushed', [
+                'tickets_id' => $tickets_id,
+                'agent'      => $agent->getID(),
+            ]);
+
+            return;
+        }
 
         $payload = ['ticket' => Payload::ticket($ticket, $clientName)];
 

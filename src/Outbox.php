@@ -28,6 +28,13 @@ final class Outbox
     private const FLUSH_TIMEOUT = 10;
 
     /**
+     * How long a row waits when the peer is not linked yet. A fixed delay, not the
+     * exponential backoff: this is not a failure, it is an administrator who has not
+     * bound the agent to a customer entity yet, and that can take days.
+     */
+    private const HOLD_DELAY = 300;
+
+    /**
      * Queues an event and tries to deliver it right away.
      */
     public static function push(int $agents_id, string $action, array $payload, string $idempotencyKey): bool
@@ -135,15 +142,35 @@ final class Outbox
             return false;
         }
 
+        $payload = Envelope::decode((string) $row['payload']);
+
+        // The local side of the event has to still exist. A ticket purged after the
+        // event was queued has nothing left to talk about, and delivering it anyway
+        // would have the peer create or update a copy of something that is gone.
+        if (self::isOrphan($payload)) {
+            self::markDead($id, 'the local ticket was purged');
+            return false;
+        }
+
         if (!$agent->isUsable()) {
-            self::reschedule($id, (int) $row['tries'], 'peer is not linked or inactive', 0);
+            // Revoked or deactivated is a decision, and it is not coming back on its
+            // own; pending is a step in the documented enrollment, so the row waits
+            // instead of spending one of its eight tries on it.
+            if (($agent->fields['link_status'] ?? '') === Agent::STATUS_PENDING
+                && (int) ($agent->fields['is_active'] ?? 0) === 1
+            ) {
+                self::hold($id, 'peer is not linked to a customer entity yet');
+            } else {
+                self::markDead($id, 'peer is revoked or inactive');
+            }
+
             return false;
         }
 
         $result = Client::sendToAgent(
             $agent,
             (string) $row['action'],
-            Envelope::decode((string) $row['payload']),
+            $payload,
             (string) $row['idempotency_key'],
             self::FLUSH_TIMEOUT
         );
@@ -158,11 +185,7 @@ final class Outbox
             ], ['id' => $id]);
 
             // The peer's ids are only known now, so link rows are completed here.
-            Ack::handle(
-                (string) $row['action'],
-                Envelope::decode((string) $row['payload']),
-                (array) $result['body']
-            );
+            Ack::handle((string) $row['action'], $payload, (array) $result['body']);
 
             $agent->markContact((int) $result['status']);
 
@@ -227,6 +250,39 @@ final class Outbox
         }
 
         return null;
+    }
+
+    /**
+     * True when the ticket this event is about no longer has a live mirror here.
+     *
+     * `ticket.remote_id` is always the SENDER's local id, so it is our own ticket id
+     * in every action -- one lookup covers all of them.
+     */
+    private static function isOrphan(array $payload): bool
+    {
+        $tickets_id = (int) ($payload['ticket']['remote_id'] ?? 0);
+
+        if ($tickets_id <= 0) {
+            return false;
+        }
+
+        $mirror = Mirror::forTicket($tickets_id);
+
+        return $mirror === null || $mirror->isPurged();
+    }
+
+    /**
+     * Postpones a row without holding it against its retry budget.
+     */
+    private static function hold(int $id, string $reason): void
+    {
+        global $DB;
+
+        $DB->update(self::TABLE, [
+            'state'         => self::STATE_PENDING,
+            'next_try_date' => date(Clock::FORMAT, strtotime(Clock::now()) + self::HOLD_DELAY),
+            'last_error'    => Compat::escapeForDb($reason),
+        ], ['id' => $id]);
     }
 
     private static function reschedule(int $id, int $tries, string $error, int $status): void

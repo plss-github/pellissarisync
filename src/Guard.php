@@ -26,6 +26,24 @@ final class Guard
     }
 
     /**
+     * Locks an item for the rest of the request, with no scope to come back to.
+     *
+     * For a purge, where the lock cannot be a callback scope: core runs
+     * cleanDBonPurge() while the row still exists, and the children it destroys
+     * recompute the parent -- CommonITILActor::post_deleteFromDB() sets the ticket
+     * back to INCOMING when the last assignee goes away, ignoring
+     * _do_not_compute_status and carrying none of our markers. That update looked
+     * like a genuine local change and was propagated, which reopened the peer's copy;
+     * for a ticket with no mirror row it went further and pushed a CREATION for a
+     * ticket in the middle of being destroyed. Locking from pre_item_purge makes the
+     * whole cascade inert.
+     */
+    public static function lock(string $itemtype, int $id): void
+    {
+        self::$locks[self::key($itemtype, $id)] = true;
+    }
+
+    /**
      * Runs $fn with the item locked; nested calls for the same item return null.
      */
     public static function run(string $itemtype, int $id, callable $fn): mixed
@@ -36,7 +54,7 @@ final class Guard
             return null;
         }
 
-        self::$locks[$key] = true;
+        self::lock($itemtype, $id);
 
         try {
             return $fn();

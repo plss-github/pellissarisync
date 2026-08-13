@@ -62,6 +62,9 @@ $iterator = $DB->request([
 $statuses = Ticket::getAllStatusArray();
 
 foreach ($iterator as $row) {
+    // A purged mirror is a tombstone: the local ticket no longer exists, so there is
+    // no status to show and nothing to link to.
+    $row['is_purged']    = $row['sync_state'] === Mirror::STATE_PURGED;
     $row['status_label'] = $statuses[(int) $row['ticket_status']] ?? '';
     $row['origin_label'] = $row['origin'] === Config::ROLE_AGENT
         ? __('Customer (agent)', 'pellissarisync')

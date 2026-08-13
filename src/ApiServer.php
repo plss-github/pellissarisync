@@ -107,6 +107,17 @@ final class ApiServer
             $body = Compat::asSystem(
                 static fn(): array => self::dispatch($action, $agent, $payload)
             );
+        } catch (MirrorPurgedException $e) {
+            // Accepted and dropped. The peer is talking about a ticket that was
+            // purged here, which it could not have known: purge is never propagated.
+            // Answering 422 like any other failure would make it retry eight times
+            // and bury the event, again for every single change to that ticket.
+            Log::write('inbound change ignored: the local ticket was purged', [
+                'action' => $action,
+                'uuid'   => $uuid,
+            ]);
+
+            $body = ['ok' => true, 'ignored' => 'the mirrored ticket was purged on this end'];
         } catch (Throwable $e) {
             Log::write('inbound apply failed: ' . $e->getMessage(), [
                 'action' => $action,
@@ -272,6 +283,14 @@ final class ApiServer
 
         if ($mirror === null) {
             throw new \RuntimeException('unknown mirrored ticket');
+        }
+
+        // The row is a tombstone: the ticket it pointed at was purged here. Told
+        // apart from an unknown mirror on purpose -- one is a broken link worth
+        // retrying and logging as a failure, the other is a local decision the peer
+        // has to be allowed to move past.
+        if ($mirror->isPurged()) {
+            throw new MirrorPurgedException('the mirrored ticket was purged locally');
         }
 
         return $mirror;

@@ -35,9 +35,17 @@ final class TicketSync
         }
 
         // A replay that slipped past the idempotency ledger still must not
-        // duplicate the mirror.
+        // duplicate the mirror. A tombstone counts: the local ticket was purged, and
+        // a redelivered creation must not resurrect it as a second ticket.
         $existing = Mirror::forRemoteTicket($agent->getID(), $remoteId);
         if ($existing !== null) {
+            if ($existing->isPurged()) {
+                Log::write('creation ignored: this mirror was purged locally', [
+                    'remote_id' => $remoteId,
+                    'agent'     => $agent->getID(),
+                ]);
+            }
+
             return [
                 'tickets_id' => (int) $existing->fields['tickets_id'],
                 'mirrors_id' => $existing->getID(),
@@ -82,7 +90,7 @@ final class TicketSync
             'origin'                          => self::remoteRole(),
             'client_name'                     => $clientName,
             'last_received_status'             => (int) $input['status'],
-            'sync_state'                      => 'ok',
+            'sync_state'                      => Mirror::STATE_OK,
         ]);
 
         $mirror->getFromDB($mirrors_id);

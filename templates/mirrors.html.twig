@@ -35,9 +35,13 @@
                {% for row in mirrors %}
                   <tr>
                      <td>
-                        <a href="{{ path('/front/ticket.form.php', {'id': row.tickets_id}) }}">
+                        {% if row.is_purged %}
                            #{{ row.tickets_id }}
-                        </a>
+                        {% else %}
+                           <a href="{{ path('/front/ticket.form.php', {'id': row.tickets_id}) }}">
+                              #{{ row.tickets_id }}
+                           </a>
+                        {% endif %}
                      </td>
                      <td>{{ row.ticket_name }}</td>
                      <td>{{ row.client_name }}</td>
@@ -58,7 +62,13 @@
                            <span class="badge bg-orange">{{ __('not acknowledged yet', 'pellissarisync') }}</span>
                         {% endif %}
                      </td>
-                     <td>{{ row.status_label }}</td>
+                     <td>
+                        {% if row.is_purged %}
+                           <span class="badge bg-secondary">{{ __('purged locally', 'pellissarisync') }}</span>
+                        {% else %}
+                           {{ row.status_label }}
+                        {% endif %}
+                     </td>
                      <td>{{ row.date_creation ?? '-' }}</td>
                   </tr>
                {% endfor %}

@@ -19,6 +19,17 @@ class Mirror extends CommonDBTM
 {
     public static $rightname = 'plugin_pellissarisync_mirror';
 
+    public const STATE_QUEUED = 'queued';
+    public const STATE_OK     = 'ok';
+
+    /**
+     * The local ticket was destroyed, so this row is a tombstone: it no longer
+     * describes a mirror, only the fact that there used to be one. Kept instead of
+     * deleted because the peer still has its copy and keeps addressing this ticket;
+     * the row is what lets us recognise those events and answer them as a no-op.
+     */
+    public const STATE_PURGED = 'purged';
+
     public static function getTypeName($nb = 0)
     {
         return _n('Mirrored ticket', 'Mirrored tickets', $nb, 'pellissarisync');
@@ -69,6 +80,38 @@ class Mirror extends CommonDBTM
     public function isContentOwner(): bool
     {
         return ($this->fields['origin'] ?? '') === Config::role();
+    }
+
+    public function isPurged(): bool
+    {
+        return ($this->fields['sync_state'] ?? '') === self::STATE_PURGED;
+    }
+
+    /**
+     * Turns this row into a tombstone, because the local ticket was purged.
+     *
+     * The child links go for good: their local ids belonged to followups, tasks and
+     * documents that core destroyed along with the ticket, so keeping them would
+     * only let a later delivery be resolved to something that no longer exists.
+     * `remote_tickets_id` stays, because it is the peer's side of the identity and
+     * the only way to recognise what the peer sends from now on.
+     */
+    public function purge(): void
+    {
+        global $DB;
+
+        $mirrors_id = $this->getID();
+
+        foreach ([MirrorItem::getTable(), MirrorFollowup::getTable(), MirrorDocument::getTable()] as $table) {
+            $DB->delete($table, ['plugin_pellissarisync_mirrors_id' => $mirrors_id]);
+        }
+
+        $this->update([
+            'id'          => $mirrors_id,
+            'sync_state'  => self::STATE_PURGED,
+            '_no_history' => true,
+            '_no_message' => true,
+        ]);
     }
 
     // -------------------------------------------------------------------- tab

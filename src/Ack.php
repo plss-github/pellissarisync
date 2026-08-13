@@ -73,14 +73,17 @@ final class Ack
         }
 
         $mirror = Mirror::forTicket($localId);
-        if ($mirror === null) {
+
+        // A tombstone stays a tombstone: the local ticket was purged, so there is no
+        // mirror left to record an id for.
+        if ($mirror === null || $mirror->isPurged()) {
             return;
         }
 
         $mirror->update([
             'id'                => $mirror->getID(),
             'remote_tickets_id' => $remoteId,
-            'sync_state'        => 'ok',
+            'sync_state'        => Mirror::STATE_OK,
             '_no_history'       => true,
             '_no_message'       => true,
         ]);

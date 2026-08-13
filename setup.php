@@ -174,4 +174,17 @@ function plugin_init_pellissarisync(): void
     $PLUGIN_HOOKS[Hooks::ITEM_RESTORE]['pellissarisync'] = [
         'Ticket' => [Hook::class, 'onTicketRestore'],
     ];
+
+    // Purge is not propagated, but it has to be HANDLED. Core recomputes the ticket
+    // while destroying its children -- removing the last assignee sends the status
+    // back to "new" -- and those writes carry none of our markers, so they used to
+    // leave as genuine changes and reopen the peer's copy. PRE_ITEM_PURGE locks the
+    // ticket for the whole cascade; ITEM_PURGE closes the local link.
+    $PLUGIN_HOOKS[Hooks::PRE_ITEM_PURGE]['pellissarisync'] = [
+        'Ticket' => [Hook::class, 'onTicketPrePurge'],
+    ];
+
+    $PLUGIN_HOOKS[Hooks::ITEM_PURGE]['pellissarisync'] = [
+        'Ticket' => [Hook::class, 'onTicketPurge'],
+    ];
 }

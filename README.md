@@ -23,6 +23,31 @@ Quem cria um conteúdo é o único dono dele.
 | Status | **bidirecional** | É o que conta ao cliente em que pé está o atendimento |
 | Lixeira | **bidirecional** | Excluir de um lado manda o espelho para a lixeira do outro; restaurar traz de volta. **Purgar não é espelhado** — destruir dado na outra ponta não é atribuição de um espelho |
 
+Chamado na lixeira **não propaga nada**: nem texto, nem status, nem acompanhamento,
+nem anexo. Ir para a lixeira e voltar viajam pelos seus próprios eventos, então não
+existe mudança legítima a mandar enquanto o chamado está lá — e o que chegava ali era
+o núcleo remexendo no chamado, não alguém decidindo alterá-lo.
+
+### Purgar
+
+Purgar não é espelhado, mas é **tratado** — e essa parte faltava. Ao destruir um
+chamado o GLPI roda `cleanDBonPurge()` com a linha do chamado ainda de pé, e os filhos
+que ele apaga recalculam o pai: `CommonITILActor::post_deleteFromDB()` devolve o status
+para *Novo* quando o último atribuído sai, com o input do próprio núcleo e fora de
+qualquer escrita nossa. Isso saía como mudança legítima e **reabria a cópia da outra
+ponta**; sem linha de espelho, o mesmo update caía no caminho de criação e emitia um
+`ticket.create` de um chamado em pleno processo de destruição.
+
+Agora `pre_item_purge` trava o chamado, o que deixa a cascata inteira inerte, e
+`item_purge` **encerra o vínculo local**: as linhas filhas (itens, acompanhamentos,
+anexos) somem junto com os ids que morreram, e a de `..._mirrors` fica como *lápide*.
+É ela que reconhece o que a outra ponta continuar mandando sobre aquele chamado: em vez
+de 422 oito vezes até virar `dead`, o evento é aceito como no-op explícito
+(`ignored: the mirrored ticket was purged on this end`) e a fila do peer drena. Na
+tela de espelhos a linha aparece como **purgado localmente**.
+
+A outra ponta mantém a cópia dela, de propósito — a purga é uma decisão local.
+
 Relacionamento entre chamados não é espelhado: os ids não correspondem entre as
 duas instalações e adivinhar o par pelo título produziria vínculos errados.
 
@@ -132,6 +157,14 @@ tem contrapartida na outra instalação.
 
 Toda alteração é enfileirada na `outbox` e enviada na hora. Se a outra ponta estiver fora do ar, a linha fica pendente e o `CronTask` reenvia com backoff exponencial (60s → 1h, 8 tentativas). A operação do usuário **nunca falha** por causa do espelhamento.
 
+Agent ainda *pendente* no master não é falha, é o passo do cadastro: a linha **espera**
+(5min por vez) sem gastar tentativa, e a fila drena sozinha quando o administrador
+vincular o agent à entidade do cliente. Antes o evento era descartado na hora em que
+acontecia — o chamado aberto durante a espera simplesmente não existia para o master.
+*Revogado* ou *inativo*, ao contrário, é decisão e não volta sozinho: a linha morre na
+hora. E um evento cujo chamado local foi purgado depois de enfileirado também morre —
+não há mais nada aqui sobre o que falar.
+
 Contra duplicatas há três camadas: guarda de reentrância por requisição, marcador `_psync_apply` nas escritas do próprio plugin, e a tabela `inbox` de idempotência que cobre reentregas entre requisições.
 
 ## Linha de comando
@@ -158,7 +191,7 @@ su www-data -s /bin/bash -c \
 | Tabela | Papel |
 |---|---|
 | `..._agents` | A outra ponta: uuid, URL, credenciais, entidade/cliente, vínculo e a atribuição desse cliente (`assign_users`, `assign_groups`) |
-| `..._mirrors` | Vínculo do chamado; a coluna `origin` decide quem pode propagar conteúdo |
+| `..._mirrors` | Vínculo do chamado; a coluna `origin` decide quem pode propagar conteúdo e `sync_state` distingue a lápide de um chamado purgado |
 | `..._mirrorfollowups` | Vínculo do que **chega como acompanhamento** sendo outra coisa na origem; `source_itemtype` separa os casos, já que uma solução #5 e um acompanhamento #5 têm o mesmo id em tabelas diferentes |
 | `..._mirroritems` | Vínculo dos itens que **mantêm o itemtype nas duas pontas**: tarefa, custo, aprovação e solução. Tabela separada porque a de acompanhamentos registra uma tradução, e a coluna `itilfollowups_id` dela não pode honestamente guardar o id de um custo |
 | `..._mirrordocuments` | Mapeia o anexo local ao id dele na outra ponta — o GLPI usa a mesma tabela `glpi_documents` nas duas, então os ids necessariamente divergem |

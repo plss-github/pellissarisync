@@ -84,6 +84,35 @@ class MirrorFollowup extends CommonDBTM
         return $found ? $link : null;
     }
 
+    /**
+     * The link of a local followup, whichever end wrote it -- what a purge of that
+     * followup has to consult, since it only knows the local id.
+     *
+     * The `origin` split is not cosmetic. A row this end wrote for a SOLUTION keeps
+     * the solution's id in `itilfollowups_id` (the legacy solution-as-followup path),
+     * and a solution id can collide with a followup id, so our own rows are pinned to
+     * the followup source. A row received from the peer always holds a real local
+     * followup id whatever the item was on the other side, so any source counts.
+     */
+    public static function forLocalFollowup(int $itilfollowups_id): ?self
+    {
+        if ($itilfollowups_id <= 0) {
+            return null;
+        }
+
+        $link = new self();
+
+        $found = $link->getFromDBByCrit([
+            'itilfollowups_id' => $itilfollowups_id,
+            'OR'               => [
+                ['origin' => Config::remoteRole()],
+                ['origin' => Config::role(), 'source_itemtype' => self::SOURCE_FOLLOWUP],
+            ],
+        ]);
+
+        return $found ? $link : null;
+    }
+
     public function isContentOwner(): bool
     {
         return ($this->fields['origin'] ?? '') === Config::role();

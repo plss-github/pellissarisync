@@ -21,16 +21,60 @@ Quem cria um conteúdo é o único dono dele.
 | Anexo | **somente quem anexou → outra ponta** | Bytes viajam no payload; o arquivo chega idêntico (mesmo SHA1). Inclui o arquivo enviado **na abertura** |
 | Requerente e técnico | **bidirecional, aditivo** | Casados por **e-mail**; sem usuário local, o endereço vira ator de e-mail (como num chamado aberto por e-mail). Atores são adicionados, nunca removidos |
 | Status | **bidirecional** | É o que conta ao cliente em que pé está o atendimento |
-| Lixeira | **bidirecional** | Excluir de um lado manda o espelho para a lixeira do outro; restaurar traz de volta. **Purgar não é espelhado** — destruir dado na outra ponta não é atribuição de um espelho |
+| Lixeira do chamado | **bidirecional** | Excluir de um lado manda o espelho para a lixeira do outro; restaurar traz de volta |
+| Excluir acompanhamento, tarefa, custo, aprovação ou solução | **somente a origem → outra ponta** | Quem escreveu apaga nas duas pontas. Do lado do espelho a exclusão é **recusada**: apague na origem |
+| Purgar chamado | **não espelhado** | Destruir um chamado na outra ponta não é atribuição de um espelho. Deixa lápide local |
 
 Chamado na lixeira **não propaga nada**: nem texto, nem status, nem acompanhamento,
 nem anexo. Ir para a lixeira e voltar viajam pelos seus próprios eventos, então não
 existe mudança legítima a mandar enquanto o chamado está lá — e o que chegava ali era
 o núcleo remexendo no chamado, não alguém decidindo alterá-lo.
 
-### Purgar
+### Excluir um item da linha do tempo
 
-Purgar não é espelhado, mas é **tratado** — e essa parte faltava. Ao destruir um
+Acompanhamento, tarefa, custo, aprovação e solução **não têm lixeira**: as tabelas do
+GLPI não têm coluna `is_deleted`, então o botão de excluir na linha do tempo purga de
+uma vez. É por isso que isso vive nos ganchos de purga e não em `item_delete` como o
+chamado.
+
+Vale a mesma regra de sempre — **quem escreveu é o dono**:
+
+- **a origem apaga** → o item some das duas pontas. O evento (`followup.delete`,
+  `task.delete`, `cost.delete`, `validation.delete`, `solution.delete`) sai pela fila
+  normal, com as mesmas tentativas e o mesmo log de qualquer outra mudança.
+- **o espelho tenta apagar** → a exclusão é **recusada**, não ignorada. O GLPI aborta a
+  purga quando um gancho `pre_item_purge` deixa `input` sem ser um array
+  (`CommonDBTM::delete()` devolve `false`), então o item simplesmente continua na linha
+  do tempo e o usuário recebe a mensagem dizendo para apagar na origem.
+
+Recusar em vez de deixar apagar é deliberado: o espelho é a única coisa que a outra
+ponta tem daquele conteúdo do lado de cá, e apagar só de um lado produz exatamente a
+divergência silenciosa que o plugin existe para evitar. A origem fica com o registro
+dela, como você pediu.
+
+Se algum GLPI ignorar o veto, o item é **recriado** a partir dos campos lidos antes da
+purga e a linha de vínculo é reapontada para o novo id (uma aprovação volta sem a
+resposta, porque o núcleo força toda aprovação nova para *aguardando* — isso vai para o
+log). É rede de proteção: nas versões suportadas o veto é honrado e esse caminho não
+roda.
+
+O vínculo morre junto com o item, nas duas pontas. Isso não é detalhe: uma linha
+apontando para um id que não existe mais faz toda edição futura daquele item chegar sem
+destino, ser retentada oito vezes e terminar como `dead` — em silêncio.
+
+Uma aresta conhecida: apagar a **solução** na origem faz o núcleo recalcular o status
+do chamado ali, e esse recálculo não viaja (é escrita da cascata, sem os nossos
+marcadores, exatamente como na purga do chamado). O espelho continua *solucionado* até a
+próxima mudança de status explícita na origem, que aí sim propaga.
+
+**Anexo não entra nisso.** O GLPI deduplica documento por sha1, então o mesmo arquivo em
+dois chamados é **uma** linha em `glpi_documents` compartilhada pelos dois: purgar na
+outra ponta poderia derrubar o anexo de um chamado que ninguém mencionou. Excluir anexo
+continua sendo local nas duas pontas.
+
+### Purgar o chamado
+
+Purgar o chamado não é espelhado, mas é **tratado** — e essa parte faltava. Ao destruir um
 chamado o GLPI roda `cleanDBonPurge()` com a linha do chamado ainda de pé, e os filhos
 que ele apaga recalculam o pai: `CommonITILActor::post_deleteFromDB()` devolve o status
 para *Novo* quando o último atribuído sai, com o input do próprio núcleo e fora de
@@ -46,7 +90,13 @@ de 422 oito vezes até virar `dead`, o evento é aceito como no-op explícito
 (`ignored: the mirrored ticket was purged on this end`) e a fila do peer drena. Na
 tela de espelhos a linha aparece como **purgado localmente**.
 
-A outra ponta mantém a cópia dela, de propósito — a purga é uma decisão local.
+A outra ponta mantém a cópia dela, de propósito — a purga é uma decisão local. E o
+chamado é o único caso que **não** é recriado nem recusado: recriar produziria chamado
+duplicado, então purgar o espelho de um chamado simplesmente não mexe na origem.
+
+> **Atualize as duas pontas juntas.** As ações de exclusão entraram na 1.4.0 e a lista de
+> ações aceitas é fechada dos dois lados: um peer em versão anterior responde 404, o
+> evento é retentado e acaba como `dead`. O item fica de pé lá até alguém apagar na mão.
 
 Relacionamento entre chamados não é espelhado: os ids não correspondem entre as
 duas instalações e adivinhar o par pelo título produziria vínculos errados.
@@ -68,6 +118,30 @@ O bloco é remontado a cada atualização a partir do payload, então nunca empi
 `{client}` é o **nome do agent como ele está cadastrado no destino** — na central, o nome do cliente, definido por quem vinculou o agent à entidade. Não é o nome da entidade na origem: aquele é só o que o cliente chamou a entidade dele, e vinha errado no prefixo. O nome da entidade de origem continua como último recurso, quando o cadastro do agent está sem nome.
 
 ## Instalação
+
+Tanto faz instalar em `plugins/` ou no diretório do marketplace: o endpoint do peer é
+descoberto, não presumido. Ele **precisa** ser, porque quem chama não tem como saber
+onde o **outro lado** instalou — `Plugin::getWebDir()` só descreve o install local. O
+GLPI serve `plugins/` em `/plugins/...` e o marketplace em `/marketplace/...`, e o
+comportamento medido nas duas versões é:
+
+| Peer | Plugin em | `/plugins/…` | `/marketplace/…` |
+|---|---|---|---|
+| GLPI 11 | qualquer um | responde | responde |
+| GLPI 10 | `plugins/` | responde | **404** |
+| GLPI 10 | marketplace | **404** | responde |
+
+Então `Transport\Client` tenta `/plugins/...` primeiro e, **somente diante de um 404**,
+repete em `/marketplace/...`, guardando o caminho que respondeu pelo resto da
+requisição. Repetir é seguro justamente porque foi 404: nenhum código do plugin rodou
+do outro lado, então nada pode ter sido aplicado duas vezes — e a chave de idempotência
+cobriria de todo modo. Qualquer outro resultado (200, 401, 409, falha de transporte)
+é resposta sobre a requisição em si e volta como está, sem segunda tentativa.
+
+Antes disso o caminho era fixo em `/plugins/...` e um install de marketplace no GLPI 10
+tomava **404 em toda entrega** — com o handshake e o ping passando, porque o master em
+11 responde nos dois caminhos. O `make install` deste repositório instala justamente no
+marketplace.
 
 ```bash
 php bin/console plugin:install pellissarisync -u glpi

@@ -12,6 +12,7 @@ use GlpiPlugin\Pellissarisync\Sync\TaskSync;
 use GlpiPlugin\Pellissarisync\Sync\TicketSync;
 use GlpiPlugin\Pellissarisync\Sync\ValidationSync;
 use GlpiPlugin\Pellissarisync\Compat;
+use ITILFollowup;
 use Throwable;
 
 /**
@@ -159,14 +160,19 @@ final class ApiServer
             Envelope::ACTION_TICKET_RESTORE => ['ok' => TicketSync::restore(self::requireMirror($agent, $ticketPayload))],
             Envelope::ACTION_FUP_CREATE     => self::followupCreate($agent, $ticketPayload, $followupPayload),
             Envelope::ACTION_FUP_UPDATE     => self::followupUpdate($agent, $ticketPayload, $followupPayload),
+            Envelope::ACTION_FUP_DELETE     => self::followupDelete($agent, $ticketPayload, $followupPayload),
             Envelope::ACTION_DOC_CREATE     => self::documentCreate($agent, $ticketPayload, $documentPayload),
             Envelope::ACTION_SOL_CREATE     => SolutionSync::create(self::requireMirror($agent, $ticketPayload), $itemPayload) + ['ok' => true],
+            Envelope::ACTION_SOL_DELETE     => self::itemDelete($agent, $ticketPayload, $itemPayload, SolutionSync::ITEMTYPE),
             Envelope::ACTION_TASK_CREATE    => TaskSync::create(self::requireMirror($agent, $ticketPayload), $itemPayload) + ['ok' => true],
             Envelope::ACTION_TASK_UPDATE    => ['ok' => TaskSync::update(self::requireItem($agent, $ticketPayload, $itemPayload, TaskSync::ITEMTYPE), $itemPayload)],
+            Envelope::ACTION_TASK_DELETE    => self::itemDelete($agent, $ticketPayload, $itemPayload, TaskSync::ITEMTYPE),
             Envelope::ACTION_COST_CREATE    => CostSync::create(self::requireMirror($agent, $ticketPayload), $itemPayload) + ['ok' => true],
             Envelope::ACTION_COST_UPDATE    => ['ok' => CostSync::update(self::requireItem($agent, $ticketPayload, $itemPayload, CostSync::ITEMTYPE), $itemPayload)],
+            Envelope::ACTION_COST_DELETE    => self::itemDelete($agent, $ticketPayload, $itemPayload, CostSync::ITEMTYPE),
             Envelope::ACTION_VAL_CREATE     => ValidationSync::create(self::requireMirror($agent, $ticketPayload), $itemPayload) + ['ok' => true],
             Envelope::ACTION_VAL_UPDATE     => self::validationUpdate($agent, $ticketPayload, $itemPayload),
+            Envelope::ACTION_VAL_DELETE     => self::itemDelete($agent, $ticketPayload, $itemPayload, ValidationSync::ITEMTYPE),
             default                         => ['ok' => false],
         };
     }
@@ -271,6 +277,100 @@ final class ApiServer
         }
 
         return ['ok' => FollowupSync::updateContent($link, $followupPayload)];
+    }
+
+    /**
+     * Removal of a followup the PEER wrote, applied to our copy of it.
+     *
+     * The origin filter on the lookup IS the ownership check, and it is the whole
+     * rule: a request to destroy something THIS end wrote resolves to no row and is
+     * answered as a no-op rather than applied. An item is only ever purged from the
+     * end that did not write it.
+     *
+     * A missing link is success, not failure. There is nothing here to destroy --
+     * the copy was never created, or it is already gone -- and answering 422 would
+     * have the peer retry the event until the outbox buries it as dead.
+     */
+    private static function followupDelete(Agent $agent, array $ticketPayload, array $followupPayload): array
+    {
+        $mirror   = self::requireMirror($agent, $ticketPayload);
+        $remoteId = (int) ($followupPayload['remote_id'] ?? 0);
+
+        if ($remoteId <= 0) {
+            throw new \RuntimeException('missing remote followup id');
+        }
+
+        $link = MirrorFollowup::forRemoteFollowup($mirror->getID(), $remoteId, TicketSync::remoteRole());
+
+        if ($link === null) {
+            return ['ok' => true, 'ignored' => 'no local copy of this followup'];
+        }
+
+        return ['ok' => Purge::applyRemoval($link, ITILFollowup::class)];
+    }
+
+    /**
+     * Removal of a task, cost, approval or solution the peer wrote. Same rule and
+     * same reasoning as followupDelete().
+     */
+    private static function itemDelete(
+        Agent $agent,
+        array $ticketPayload,
+        array $itemPayload,
+        string $itemtype
+    ): array {
+        $mirror   = self::requireMirror($agent, $ticketPayload);
+        $remoteId = (int) ($itemPayload['remote_id'] ?? 0);
+
+        if ($remoteId <= 0) {
+            throw new \RuntimeException(sprintf('missing remote %s id', $itemtype));
+        }
+
+        $link = MirrorItem::forRemoteItem($mirror->getID(), $itemtype, $remoteId, TicketSync::remoteRole());
+
+        if ($link !== null) {
+            return ['ok' => Purge::applyRemoval($link, $itemtype)];
+        }
+
+        // The item may not have kept its itemtype here: an approval with no local
+        // approver, and a solution from a peer that predates real solution mirroring,
+        // both landed as followups instead. That is where their removal applies.
+        $applied = false;
+
+        foreach (self::followupFallbacks($itemtype) as $source) {
+            $fallback = MirrorFollowup::forRemoteFollowup(
+                $mirror->getID(),
+                $remoteId,
+                TicketSync::remoteRole(),
+                $source
+            );
+
+            if ($fallback !== null && Purge::applyRemoval($fallback, ITILFollowup::class)) {
+                $applied = true;
+            }
+        }
+
+        return $applied
+            ? ['ok' => true]
+            : ['ok' => true, 'ignored' => 'no local copy of this item'];
+    }
+
+    /**
+     * The followup sources an itemtype can have fallen back to on this end. An
+     * approval has two, because its answer is a second timeline entry.
+     *
+     * @return string[]
+     */
+    private static function followupFallbacks(string $itemtype): array
+    {
+        return match ($itemtype) {
+            SolutionSync::ITEMTYPE   => [MirrorFollowup::SOURCE_SOLUTION],
+            ValidationSync::ITEMTYPE => [
+                MirrorFollowup::SOURCE_VALIDATION,
+                MirrorFollowup::SOURCE_VALIDATION_ANSWER,
+            ],
+            default                  => [],
+        };
     }
 
     /**

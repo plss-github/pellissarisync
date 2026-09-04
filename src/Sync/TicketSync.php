@@ -318,7 +318,7 @@ final class TicketSync
      */
     public static function remoteRole(): string
     {
-        return Config::isMaster() ? Config::ROLE_AGENT : Config::ROLE_MASTER;
+        return Config::remoteRole();
     }
 
     public static function sanitizeStatus(mixed $value): int

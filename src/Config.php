@@ -111,6 +111,16 @@ final class Config
         return self::role() === self::ROLE_MASTER;
     }
 
+    /**
+     * The role of the other end. Lives here rather than in the sync layer because
+     * the link tables need it too: `origin` is stored as a role, so telling our own
+     * rows from the peer's is a plain comparison against this value.
+     */
+    public static function remoteRole(): string
+    {
+        return self::isMaster() ? self::ROLE_AGENT : self::ROLE_MASTER;
+    }
+
     public static function isAgent(): bool
     {
         return self::role() === self::ROLE_AGENT;

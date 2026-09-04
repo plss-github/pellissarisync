@@ -2,6 +2,7 @@
 
 namespace GlpiPlugin\Pellissarisync;
 
+use CommonDBTM;
 use Document;
 use Document_Item;
 use GlpiPlugin\Pellissarisync\Protocol\Envelope;
@@ -353,7 +354,14 @@ final class Hook
     public static function onTicketPrePurge(Ticket $ticket): void
     {
         self::safely(static function () use ($ticket): void {
-            Guard::lock(Ticket::class, (int) $ticket->getID());
+            $tickets_id = (int) $ticket->getID();
+
+            Guard::lock(Ticket::class, $tickets_id);
+
+            // Timeline items are purged one by one by the cascade, and each one fires
+            // the hooks that would normally propagate or refuse its removal. None of
+            // that applies to a ticket that is being destroyed.
+            Purge::ticketPurgeStarted($tickets_id);
         });
     }
 
@@ -381,6 +389,29 @@ final class Hook
                 'remote_id'  => (int) $mirror->fields['remote_tickets_id'],
                 'agent'      => (int) $mirror->fields['plugin_pellissarisync_agents_id'],
             ]);
+        });
+    }
+
+    /**
+     * Removal of a timeline item -- followup, task, cost, approval, solution.
+     *
+     * One pair of callbacks for every itemtype: Plugin::doHook() hands the item over,
+     * so the concrete class is the itemtype. The rules themselves live in Purge,
+     * which is where the asymmetry with the ticket is explained -- an item travels
+     * only from the end that wrote it, and the other end is not allowed to destroy
+     * its copy at all.
+     */
+    public static function onTimelinePrePurge(CommonDBTM $item): void
+    {
+        self::safely(static function () use ($item): void {
+            Purge::before($item, $item::class);
+        });
+    }
+
+    public static function onTimelinePurge(CommonDBTM $item): void
+    {
+        self::safely(static function () use ($item): void {
+            Purge::after($item, $item::class);
         });
     }
 

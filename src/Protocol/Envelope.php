@@ -25,14 +25,19 @@ final class Envelope
     public const ACTION_TICKET_RESTORE = 'ticket.restore';
     public const ACTION_FUP_CREATE     = 'followup.create';
     public const ACTION_FUP_UPDATE     = 'followup.update';
+    public const ACTION_FUP_DELETE     = 'followup.delete';
     public const ACTION_DOC_CREATE     = 'document.create';
     public const ACTION_SOL_CREATE     = 'solution.create';
+    public const ACTION_SOL_DELETE     = 'solution.delete';
     public const ACTION_TASK_CREATE    = 'task.create';
     public const ACTION_TASK_UPDATE    = 'task.update';
+    public const ACTION_TASK_DELETE    = 'task.delete';
     public const ACTION_COST_CREATE    = 'cost.create';
     public const ACTION_COST_UPDATE    = 'cost.update';
+    public const ACTION_COST_DELETE    = 'cost.delete';
     public const ACTION_VAL_CREATE     = 'validation.create';
     public const ACTION_VAL_UPDATE     = 'validation.update';
+    public const ACTION_VAL_DELETE     = 'validation.delete';
 
     /**
      * ACTION_FUP_CREATE still carries solutions coming from a peer that predates
@@ -52,14 +57,19 @@ final class Envelope
             self::ACTION_TICKET_RESTORE,
             self::ACTION_FUP_CREATE,
             self::ACTION_FUP_UPDATE,
+            self::ACTION_FUP_DELETE,
             self::ACTION_DOC_CREATE,
             self::ACTION_SOL_CREATE,
+            self::ACTION_SOL_DELETE,
             self::ACTION_TASK_CREATE,
             self::ACTION_TASK_UPDATE,
+            self::ACTION_TASK_DELETE,
             self::ACTION_COST_CREATE,
             self::ACTION_COST_UPDATE,
+            self::ACTION_COST_DELETE,
             self::ACTION_VAL_CREATE,
             self::ACTION_VAL_UPDATE,
+            self::ACTION_VAL_DELETE,
         ];
     }
 

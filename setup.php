@@ -16,7 +16,7 @@ use GlpiPlugin\Pellissarisync\Config;
 use GlpiPlugin\Pellissarisync\Hook;
 use GlpiPlugin\Pellissarisync\Mirror;
 
-define('PLUGIN_PELLISSARISYNC_VERSION', '1.3.0');
+define('PLUGIN_PELLISSARISYNC_VERSION', '1.4.0');
 
 // Customers still run GLPI 10.0.x while the support desk runs 11, so both are
 // supported and may be mirrored against each other. `max` is exclusive.
@@ -175,16 +175,31 @@ function plugin_init_pellissarisync(): void
         'Ticket' => [Hook::class, 'onTicketRestore'],
     ];
 
-    // Purge is not propagated, but it has to be HANDLED. Core recomputes the ticket
-    // while destroying its children -- removing the last assignee sends the status
-    // back to "new" -- and those writes carry none of our markers, so they used to
-    // leave as genuine changes and reopen the peer's copy. PRE_ITEM_PURGE locks the
+    // Purge of a TICKET is not propagated, but it has to be HANDLED. Core recomputes
+    // the ticket while destroying its children -- removing the last assignee sends the
+    // status back to "new" -- and those writes carry none of our markers, so they used
+    // to leave as genuine changes and reopen the peer's copy. PRE_ITEM_PURGE locks the
     // ticket for the whole cascade; ITEM_PURGE closes the local link.
+    //
+    // Purge of a TIMELINE ITEM is a different matter and does travel, because these
+    // have no bin: glpi_itilfollowups and the rest carry no is_deleted column, so the
+    // delete button in the timeline purges outright. Ownership decides, as everywhere
+    // else -- see Purge, which also refuses the purge of a copy the peer owns.
     $PLUGIN_HOOKS[Hooks::PRE_ITEM_PURGE]['pellissarisync'] = [
-        'Ticket' => [Hook::class, 'onTicketPrePurge'],
+        'Ticket'           => [Hook::class, 'onTicketPrePurge'],
+        'ITILFollowup'     => [Hook::class, 'onTimelinePrePurge'],
+        'ITILSolution'     => [Hook::class, 'onTimelinePrePurge'],
+        'TicketTask'       => [Hook::class, 'onTimelinePrePurge'],
+        'TicketCost'       => [Hook::class, 'onTimelinePrePurge'],
+        'TicketValidation' => [Hook::class, 'onTimelinePrePurge'],
     ];
 
     $PLUGIN_HOOKS[Hooks::ITEM_PURGE]['pellissarisync'] = [
-        'Ticket' => [Hook::class, 'onTicketPurge'],
+        'Ticket'           => [Hook::class, 'onTicketPurge'],
+        'ITILFollowup'     => [Hook::class, 'onTimelinePurge'],
+        'ITILSolution'     => [Hook::class, 'onTimelinePurge'],
+        'TicketTask'       => [Hook::class, 'onTimelinePurge'],
+        'TicketCost'       => [Hook::class, 'onTimelinePurge'],
+        'TicketValidation' => [Hook::class, 'onTimelinePurge'],
     ];
 }

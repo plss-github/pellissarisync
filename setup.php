@@ -16,7 +16,7 @@ use GlpiPlugin\Pellissarisync\Config;
 use GlpiPlugin\Pellissarisync\Hook;
 use GlpiPlugin\Pellissarisync\Mirror;
 
-define('PLUGIN_PELLISSARISYNC_VERSION', '1.4.0');
+define('PLUGIN_PELLISSARISYNC_VERSION', '1.4.1');
 
 // Customers still run GLPI 10.0.x while the support desk runs 11, so both are
 // supported and may be mirrored against each other. `max` is exclusive.
@@ -137,8 +137,10 @@ function plugin_init_pellissarisync(): void
     }
 
     if ($role === Config::ROLE_MASTER) {
+        // Under Administration rather than the generic "Plugins" section: these are
+        // administration screens, and the sidebar entry reads as such.
         $PLUGIN_HOOKS[Hooks::MENU_TOADD]['pellissarisync'] = [
-            'plugins' => [Agent::class, Mirror::class],
+            'admin' => [Agent::class, Mirror::class],
         ];
     }
 

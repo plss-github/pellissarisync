@@ -11,27 +11,9 @@ if (!defined('GLPI_ROOT')) {
 use Glpi\Application\View\TemplateRenderer;
 use GlpiPlugin\Pellissarisync\Agent;
 use GlpiPlugin\Pellissarisync\Config;
-use GlpiPlugin\Pellissarisync\Ping;
 use GlpiPlugin\Pellissarisync\Schema;
 
 Session::checkRight(Schema::RIGHT_AGENT, READ);
-
-if (isset($_POST['ping'])) {
-    Session::checkRight(Schema::RIGHT_AGENT, UPDATE);
-
-    $agent = new Agent();
-    if ($agent->getFromDB((int) $_POST['ping'])) {
-        $result = Ping::run($agent);
-
-        Session::addMessageAfterRedirect(
-            htmlescape($agent->getName() . ' - ' . $result['message']),
-            true,
-            $result['ok'] ? INFO : ERROR
-        );
-    }
-
-    Html::back();
-}
 
 Html::header(
     Agent::getTypeName(Session::getPluralNumber()),
@@ -61,6 +43,8 @@ foreach ($DB->request(['FROM' => Agent::getTable(), 'WHERE' => ['is_master' => 0
         'status_label' => $agent->getStatusLabel(),
         'tickets'      => $agent->countTickets(),
         'usable'       => $agent->isUsable(),
+        // Changes waiting for this agent's next poll.
+        'queued'       => $agent->countQueued(),
     ];
 }
 

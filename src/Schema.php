@@ -349,11 +349,20 @@ final class Schema
 
     private static function registerCrons(): void
     {
-        CronTask::register(Cron::class, 'outbox', MINUTE_TIMESTAMP, [
-            'state' => CronTask::STATE_WAITING,
-            'mode'  => CronTask::MODE_EXTERNAL,
-            'param' => 50,
+        global $DB;
+
+        // The outbox task of 1.4 and earlier delivered the queue by pushing it to
+        // the peer every minute. The master no longer pushes and the agent's retries
+        // now ride on its poll, so the task has nothing left to do.
+        $DB->delete(CronTask::getTable(), [
+            'itemtype' => Cron::class,
+            'name'     => 'outbox',
         ]);
+
+        // An upgrade keeps the interval an agent already received from its master.
+        Cron::ensurePollTask(
+            Exchange::clampMinutes((int) Config::get('poll_interval', Exchange::DEFAULT_POLL_MINUTES)) * MINUTE_TIMESTAMP
+        );
 
         CronTask::register(Cron::class, 'cleanup', DAY_TIMESTAMP, [
             'state' => CronTask::STATE_WAITING,

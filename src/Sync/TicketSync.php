@@ -111,8 +111,10 @@ final class TicketSync
         // carry the plugin's own marker, so no hook fired for them.
         //
         // Deferred, not pushed: we are inside the peer's own delivery, and it only
-        // learns this ticket's id from the answer we have not returned yet. The cron
-        // flush sends it right after.
+        // learns this ticket's id from the answer we have not returned yet. The sync
+        // carries it after that answer: on the master, later in the same response,
+        // behind the result of the creation; on the agent, in the next round, behind
+        // the ack that tells the master our id.
         Hook::pushActors($tickets_id, now: false);
 
         Log::write('mirror created', [

@@ -8,8 +8,14 @@ use GlpiPlugin\Pellissarisync\Transport\Client;
 /**
  * Outbound queue.
  *
- * Every change is queued first and then pushed immediately; if the peer is down
- * the row stays pending and the cron task retries with an exponential backoff.
+ * Every change is queued first. What happens next depends on the side:
+ *
+ *  - on the AGENT the row is pushed to the master right away and, if that fails,
+ *    goes out again inside the next sync exchange (see Exchange::run());
+ *  - on the MASTER the row is never pushed. It waits for the agent's next poll and
+ *    travels back in the HTTP response (see Exchange::serve()), because the master
+ *    usually cannot reach the agent at all.
+ *
  * Queueing first is what makes the mirror survive an unreachable peer instead of
  * losing the event.
  */
@@ -35,7 +41,7 @@ final class Outbox
     private const HOLD_DELAY = 300;
 
     /**
-     * Queues an event and tries to deliver it right away.
+     * Queues an event and, on the agent, tries to deliver it right away.
      */
     public static function push(int $agents_id, string $action, array $payload, string $idempotencyKey): bool
     {
@@ -58,6 +64,12 @@ final class Outbox
             return false;
         }
 
+        // Queued is as far as the master goes: the row leaves in the response to
+        // the agent's next sync.
+        if (Config::isMaster()) {
+            return true;
+        }
+
         return self::deliver($id);
     }
 
@@ -67,8 +79,8 @@ final class Outbox
      * For events produced *while applying* an inbound change. The peer cannot
      * address our ticket yet: it learns our id from the response to the delivery
      * we are still handling, so an immediate push is guaranteed to come back as
-     * "unknown mirrored ticket". Leaving the row pending lets the cron flush send
-     * it once that round-trip has completed.
+     * "unknown mirrored ticket". Leaving the row pending lets the next sync round
+     * carry it, once that round-trip has completed.
      */
     public static function defer(int $agents_id, string $action, array $payload, string $idempotencyKey): bool
     {
@@ -125,29 +137,222 @@ final class Outbox
     }
 
     /**
-     * Attempts a single delivery and records the outcome.
+     * Attempts a single direct delivery and records the outcome. Agent only.
      */
     public static function deliver(int $id): bool
     {
-        global $DB;
+        if (Config::isMaster()) {
+            return false;
+        }
 
         $row = self::find($id);
         if ($row === null || $row['state'] === self::STATE_SENT) {
             return true;
         }
 
-        $agent = new Agent();
-        if (!$agent->getFromDB((int) $row['plugin_pellissarisync_agents_id'])) {
-            self::markDead($id, 'unknown peer');
+        $agent = self::peerOf($row);
+        if ($agent === null || !self::isDeliverable($row, $agent)) {
             return false;
         }
 
-        $payload = Envelope::decode((string) $row['payload']);
+        $result = Client::sendToAgent(
+            $agent,
+            (string) $row['action'],
+            Envelope::decode((string) $row['payload']),
+            (string) $row['idempotency_key'],
+            self::FLUSH_TIMEOUT
+        );
+
+        $agent->markContact((int) $result['status'], (string) $result['error']);
+
+        return self::recordResult($row, $result);
+    }
+
+    /**
+     * The rows due for one peer, ready to travel inside a sync exchange.
+     *
+     * On the master ($lease = true) handing a row out counts as an attempt: its
+     * tries go up and it is pushed back by the usual backoff, so an agent that
+     * keeps failing to acknowledge an event -- or crashes while applying it --
+     * cannot have it forever. The acknowledgement settles it (see settle()); a
+     * lease that expires unacknowledged simply hands it out again, and the agent's
+     * inbox turns that repeat into a no-op.
+     *
+     * On the agent nothing is leased: the rows go out in the request body and the
+     * answer to each one comes back in the same response.
+     *
+     * @return list<array{key: string, action: string, payload: array}>
+     */
+    public static function batch(Agent $agent, int $limit, int $maxBytes, bool $lease): array
+    {
+        global $DB;
+
+        if ($limit <= 0) {
+            return [];
+        }
+
+        $rows = $DB->request([
+            'FROM'   => self::TABLE,
+            'WHERE'  => [
+                'plugin_pellissarisync_agents_id' => $agent->getID(),
+                'state'                           => [self::STATE_PENDING, self::STATE_FAILED],
+                'next_try_date'                   => ['<=', Clock::now()],
+            ],
+            // Oldest first, so changes on the same ticket keep their order.
+            'ORDER'  => 'id ASC',
+            // Some rows may be discarded below (orphans, exhausted leases), so a
+            // little more than the limit is read.
+            'LIMIT'  => $limit * 2,
+        ]);
+
+        $events = [];
+        $bytes  = 0;
+
+        foreach ($rows as $row) {
+            if (count($events) >= $limit) {
+                break;
+            }
+
+            if (!self::isDeliverable($row, $agent)) {
+                continue;
+            }
+
+            if ($lease && (int) $row['tries'] >= self::MAX_TRIES) {
+                self::markDead((int) $row['id'], 'never acknowledged by the agent', 0, (int) $row['tries']);
+                continue;
+            }
+
+            // Attachments travel inline, so the batch is bounded by size as well as
+            // by count -- but a single oversized row still goes out on its own,
+            // or it would block the queue behind it forever.
+            $size = strlen((string) $row['payload']);
+            if ($events !== [] && $bytes + $size > $maxBytes) {
+                break;
+            }
+            $bytes += $size;
+
+            if ($lease) {
+                self::leaseRow($row);
+            }
+
+            $events[] = [
+                'key'     => (string) $row['idempotency_key'],
+                'action'  => (string) $row['action'],
+                'payload' => Envelope::decode((string) $row['payload']),
+            ];
+        }
+
+        return $events;
+    }
+
+    /**
+     * Records the peer's answer to one event it received in a sync exchange.
+     *
+     * Looked up by key AND peer: an agent can only ever settle the rows that were
+     * addressed to it.
+     *
+     * @param bool $leased true on the master, where handing the row out already
+     *                     counted the attempt
+     */
+    public static function settle(int $agents_id, string $key, int $status, array $body, string $error, bool $leased): bool
+    {
+        global $DB;
+
+        if ($key === '') {
+            return false;
+        }
+
+        $rows = $DB->request([
+            'FROM'  => self::TABLE,
+            'WHERE' => [
+                'plugin_pellissarisync_agents_id' => $agents_id,
+                'idempotency_key'                 => $key,
+            ],
+        ]);
+
+        foreach ($rows as $row) {
+            if ($row['state'] === self::STATE_SENT || $row['state'] === self::STATE_DEAD) {
+                return $row['state'] === self::STATE_SENT;
+            }
+
+            return self::recordResult($row, [
+                'ok'     => $status >= 200 && $status < 300,
+                'status' => $status,
+                'body'   => $body,
+                'error'  => $error !== '' ? $error : ('HTTP ' . $status),
+            ], countTry: !$leased);
+        }
+
+        return false;
+    }
+
+    /**
+     * Records the outcome of one delivery attempt, whichever way it travelled.
+     *
+     * @param bool $countTry false when the attempt was already counted (a leased
+     *                       row on the master)
+     */
+    private static function recordResult(array $row, array $result, bool $countTry = true): bool
+    {
+        global $DB;
+
+        $id     = (int) $row['id'];
+        $status = (int) $result['status'];
+        $tries  = (int) $row['tries'] + ($countTry ? 1 : 0);
+
+        if ($result['ok']) {
+            $DB->update(self::TABLE, [
+                'state'            => self::STATE_SENT,
+                'tries'            => max(1, $tries),
+                'sent_time'        => Clock::now(),
+                'last_status_code' => $status,
+                'last_error'       => '',
+            ], ['id' => $id]);
+
+            // The peer's ids are only known now, so link rows are completed here.
+            Ack::handle((string) $row['action'], Envelope::decode((string) $row['payload']), (array) $result['body']);
+
+            return true;
+        }
+
+        // The master answers 409 while it has not bound this agent to a customer
+        // entity yet. That is the enrollment, not a failure: wait, without spending
+        // one of the tries.
+        if ($status === 409) {
+            self::hold($id, (string) $result['error']);
+            return false;
+        }
+
+        // Status 0 is a transport failure: the peer never saw the event, so nothing
+        // was refused. It is retried with backoff but does not bring the row closer
+        // to dead -- a master offline for a day must not cost the customer its queue.
+        if ($status === 0 && $countTry) {
+            $tries = (int) $row['tries'];
+        }
+
+        self::reschedule($id, $tries, (string) $result['error'], $status);
+
+        Log::write('outbox delivery failed', [
+            'id'     => $id,
+            'action' => $row['action'],
+            'status' => $status,
+            'error'  => $result['error'],
+        ]);
+
+        return false;
+    }
+
+    /**
+     * Whether a row can travel now. Settles the row itself when it cannot.
+     */
+    private static function isDeliverable(array $row, Agent $agent): bool
+    {
+        $id = (int) $row['id'];
 
         // The local side of the event has to still exist. A ticket purged after the
         // event was queued has nothing left to talk about, and delivering it anyway
         // would have the peer create or update a copy of something that is gone.
-        if (self::isOrphan($payload)) {
+        if (self::isOrphan(Envelope::decode((string) $row['payload']))) {
             self::markDead($id, 'the local ticket was purged');
             return false;
         }
@@ -167,71 +372,48 @@ final class Outbox
             return false;
         }
 
-        $result = Client::sendToAgent(
-            $agent,
-            (string) $row['action'],
-            $payload,
-            (string) $row['idempotency_key'],
-            self::FLUSH_TIMEOUT
-        );
+        return true;
+    }
 
-        if ($result['ok']) {
-            $DB->update(self::TABLE, [
-                'state'            => self::STATE_SENT,
-                'tries'            => (int) $row['tries'] + 1,
-                'sent_time'        => Clock::now(),
-                'last_status_code' => (int) $result['status'],
-                'last_error'       => '',
-            ], ['id' => $id]);
+    private static function peerOf(array $row): ?Agent
+    {
+        $agent = new Agent();
 
-            // The peer's ids are only known now, so link rows are completed here.
-            Ack::handle((string) $row['action'], $payload, (array) $result['body']);
-
-            $agent->markContact((int) $result['status']);
-
-            return true;
+        if (!$agent->getFromDB((int) $row['plugin_pellissarisync_agents_id'])) {
+            self::markDead((int) $row['id'], 'unknown peer');
+            return null;
         }
 
-        self::reschedule($id, (int) $row['tries'], (string) $result['error'], (int) $result['status']);
-        $agent->markContact((int) $result['status'], (string) $result['error']);
-
-        Log::write('outbox delivery failed', [
-            'id'     => $id,
-            'action' => $row['action'],
-            'status' => $result['status'],
-            'error'  => $result['error'],
-        ]);
-
-        return false;
+        return $agent;
     }
 
     /**
-     * Delivers the pending rows that are due. Returns the number of successes.
+     * Counts the hand-out as an attempt and pushes the row back by the backoff, so
+     * it is not handed out again before the agent had the chance to acknowledge it.
      */
-    public static function flush(int $limit = 50): int
+    private static function leaseRow(array $row): void
     {
         global $DB;
 
-        $rows = $DB->request([
-            'SELECT' => ['id'],
-            'FROM'   => self::TABLE,
-            'WHERE'  => [
-                'state'         => [self::STATE_PENDING, self::STATE_FAILED],
-                'next_try_date' => ['<=', Clock::now()],
-            ],
-            // Oldest first, so changes on the same ticket keep their order.
-            'ORDER'  => 'id ASC',
-            'LIMIT'  => $limit,
+        $tries = (int) $row['tries'] + 1;
+
+        $DB->update(self::TABLE, [
+            'tries'         => $tries,
+            'next_try_date' => date(Clock::FORMAT, strtotime(Clock::now()) + self::delay($tries)),
+            'last_error'    => 'awaiting acknowledgement from the agent',
+        ], ['id' => (int) $row['id']]);
+    }
+
+    /**
+     * Rows of one peer that are due right now.
+     */
+    public static function countDue(int $agents_id): int
+    {
+        return countElementsInTable(self::TABLE, [
+            'plugin_pellissarisync_agents_id' => $agents_id,
+            'state'                           => [self::STATE_PENDING, self::STATE_FAILED],
+            'next_try_date'                   => ['<=', Clock::now()],
         ]);
-
-        $delivered = 0;
-        foreach ($rows as $row) {
-            if (self::deliver((int) $row['id'])) {
-                $delivered++;
-            }
-        }
-
-        return $delivered;
     }
 
     public static function countPending(): int
@@ -285,26 +467,30 @@ final class Outbox
         ], ['id' => $id]);
     }
 
+    /**
+     * @param int $tries the tries count to store, this attempt included
+     */
     private static function reschedule(int $id, int $tries, string $error, int $status): void
     {
         global $DB;
-
-        $tries = $tries + 1;
 
         if ($tries >= self::MAX_TRIES) {
             self::markDead($id, $error, $status, $tries);
             return;
         }
 
-        $delay = min(self::MAX_DELAY, self::BASE_DELAY * (2 ** ($tries - 1)));
-
         $DB->update(self::TABLE, [
             'state'            => self::STATE_FAILED,
             'tries'            => $tries,
-            'next_try_date'    => date(Clock::FORMAT, strtotime(Clock::now()) + $delay),
+            'next_try_date'    => date(Clock::FORMAT, strtotime(Clock::now()) + self::delay($tries)),
             'last_status_code' => $status,
             'last_error'       => Compat::escapeForDb($error),
         ], ['id' => $id]);
+    }
+
+    private static function delay(int $tries): int
+    {
+        return min(self::MAX_DELAY, self::BASE_DELAY * (2 ** (max(1, $tries) - 1)));
     }
 
     private static function markDead(int $id, string $error, int $status = 0, ?int $tries = null): void

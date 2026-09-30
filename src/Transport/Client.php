@@ -13,6 +13,10 @@ use Throwable;
 /**
  * Outbound HTTP calls to the peer instance.
  *
+ * Only ever opened by the AGENT: the master answers requests and never initiates
+ * one, because a customer network routinely lets the agent out but nothing in.
+ * What the master has to say travels back in the response to the agent's sync.
+ *
  * The client comes from Compat so that GLPI 11's proxy-aware factory is used
  * where it exists, falling back to a plain Guzzle client on GLPI 10.
  */
@@ -42,7 +46,7 @@ final class Client
     /**
      * The path that last answered, per peer base URL.
      *
-     * Request-scoped on purpose: it spares an outbox flush one wasted probe per
+     * Request-scoped on purpose: it spares a sync run one wasted probe per
      * event without adding a column that would then have to be migrated, guessed
      * at install time, and kept correct when a peer is moved between directories.
      *
@@ -64,7 +68,7 @@ final class Client
     }
 
     /**
-     * @return array{ok: bool, status: int, body: array, error: string}
+     * @return array{ok: bool, status: int, body: array, error: string, raw: string, signature: string}
      */
     public static function send(
         string $baseUrl,
@@ -76,6 +80,12 @@ final class Client
         string $idempotencyKey,
         int $timeout = 10
     ): array {
+        // The last line of defence of the passive design: whatever path got here,
+        // the master does not dial out.
+        if (Config::isMaster()) {
+            return self::failure(0, 'the master never opens a connection to an agent');
+        }
+
         if ($baseUrl === '') {
             return self::failure(0, 'peer URL is not configured');
         }
@@ -148,7 +158,7 @@ final class Client
     /**
      * One HTTP attempt against one endpoint path.
      *
-     * @return array{ok: bool, status: int, body: array, error: string}
+     * @return array{ok: bool, status: int, body: array, error: string, raw: string, signature: string}
      */
     private static function attempt(
         string $baseUrl,
@@ -182,15 +192,20 @@ final class Client
             ]);
 
             $status = $response->getStatusCode();
-            $body   = Envelope::decode((string) $response->getBody());
+            $raw    = (string) $response->getBody();
+            $body   = Envelope::decode($raw);
 
             return [
-                'ok'     => $status >= 200 && $status < 300,
-                'status' => $status,
-                'body'   => $body,
-                'error'  => $status >= 200 && $status < 300
+                'ok'        => $status >= 200 && $status < 300,
+                'status'    => $status,
+                'body'      => $body,
+                'error'     => $status >= 200 && $status < 300
                     ? ''
                     : (string) ($body['error'] ?? ('HTTP ' . $status)),
+                // The exact bytes and the peer's signature over them, for the
+                // callers that must authenticate the answer (see Exchange).
+                'raw'       => $raw,
+                'signature' => $response->getHeaderLine(Envelope::HEADER_SIGN),
             ];
         } catch (GuzzleException | Throwable $e) {
             return self::failure(0, $e->getMessage());
@@ -216,6 +231,6 @@ final class Client
 
     private static function failure(int $status, string $error): array
     {
-        return ['ok' => false, 'status' => $status, 'body' => [], 'error' => $error];
+        return ['ok' => false, 'status' => $status, 'body' => [], 'error' => $error, 'raw' => '', 'signature' => ''];
     }
 }

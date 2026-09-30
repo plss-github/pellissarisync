@@ -43,13 +43,19 @@ final class Config
             'enrollment_token'         => '',
             // Agent side
             'master_url'               => '',
-            // Base URL the master must use to reach this agent; falls back to
-            // $CFG_GLPI['url_base'] when left empty.
+            // Unused since 1.5.0, when the master stopped calling agents. Kept so
+            // that uninstall still removes the row older installs have.
             'own_url'                  => '',
             'trigger_itilcategories_id' => 0,
             'handshake_status'         => 'none',
             'last_handshake'           => '',
             'last_handshake_error'     => '',
+            'last_poll'                => '',
+            'last_poll_error'          => '',
+            // Minutes between two polls. Set on the master, which hands it to every
+            // agent on the handshake and on each sync; on an agent it is the copy
+            // last received.
+            'poll_interval'            => 5,
             // Master side
             'mirror_itilcategories_id' => 0,
             'title_prefix_template'    => '[{client}]',

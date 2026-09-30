@@ -21,6 +21,10 @@ use Throwable;
  * Reached through front/api.php, which boot() declares stateless: no session, no
  * cookies, no CSRF and no login check. Authentication is therefore entirely this
  * class's responsibility.
+ *
+ * On the master this is the whole of the protocol: agents call in, the master
+ * answers. On an agent the endpoint stays open only for masters older than 1.5.0,
+ * which still push; a current master never calls it.
  */
 final class ApiServer
 {
@@ -81,6 +85,58 @@ final class ApiServer
             return ['status' => 200, 'body' => self::pong($agent)];
         }
 
+        if ($action === Envelope::ACTION_SYNC) {
+            return self::sync($agent, $rawBody);
+        }
+
+        return self::apply($agent, $action, Envelope::decode($rawBody), $idemKey);
+    }
+
+    /**
+     * The poll. Master only: it is the one request through which an agent both
+     * hands over its own changes and collects the master's.
+     *
+     * @return array{status: int, body: array, sign_secret?: string}
+     */
+    private static function sync(Agent $agent, string $rawBody): array
+    {
+        if (!Config::isMaster()) {
+            return ['status' => 400, 'body' => ['error' => 'this instance is not a master']];
+        }
+
+        try {
+            $body = Exchange::serve($agent, Envelope::decode($rawBody));
+        } catch (Throwable $e) {
+            Log::write('sync failed: ' . $e->getMessage(), [
+                'uuid' => (string) $agent->fields['uuid'],
+                'line' => $e->getLine(),
+            ]);
+
+            return ['status' => 500, 'body' => ['error' => 'the master could not process this sync']];
+        }
+
+        // Signed, because the agent is about to apply what is in it: TLS alone
+        // would let anything that can answer on the master's address feed tickets
+        // into the customer's GLPI.
+        return ['status' => 200, 'body' => $body, 'sign_secret' => $agent->getAuthSecret()];
+    }
+
+    /**
+     * Applies one change the peer sent, whether it came in its own request or
+     * inside a sync exchange -- and, on the agent, whether it came pushed by an
+     * older master or collected by a poll. The authentication has already been
+     * done by the caller.
+     *
+     * @return array{status: int, body: array}
+     */
+    public static function apply(Agent $agent, string $action, array $payload, string $idemKey): array
+    {
+        if (!in_array($action, Envelope::eventActions(), true)) {
+            return ['status' => 404, 'body' => ['error' => 'unknown action']];
+        }
+
+        $uuid = (string) ($agent->fields['uuid'] ?? '');
+
         // A retried delivery must be a no-op, not a duplicate.
         $cached = Inbox::findResult($agent->getID(), $idemKey);
         if ($cached !== null) {
@@ -93,8 +149,6 @@ final class ApiServer
                 'body'   => ['error' => 'peer is not linked to a customer entity yet'],
             ];
         }
-
-        $payload = Envelope::decode($rawBody);
 
         // Core writes audit entries with $_SESSION['glpiname'] (Document and
         // Event::log among others). The stateless endpoint has no session, which

@@ -682,7 +682,7 @@ final class Hook
      * core rearranging it (a purge cascade, an automatic action), never from someone
      * deciding to change it.
      *
-     * The peer only has to EXIST here; whether it is usable is Outbox::deliver()'s
+     * The peer only has to EXIST here; whether it is usable is the outbox's
      * call. A peer still pending its customer entity is the documented state of a
      * fresh install, and dropping the event at this point lost it for good.
      *
@@ -861,7 +861,7 @@ final class Hook
         // Not being usable YET is not a reason to lose the ticket: on the master an
         // agent stays pending until an administrator binds it to a customer entity,
         // and that is precisely when its first tickets are opened. The event is
-        // queued and Outbox::deliver() holds it back until the peer is linked.
+        // queued and the outbox holds it back until the peer is linked.
         if ($agent === null) {
             Log::write('no peer for ticket', [
                 'tickets_id'  => $tickets_id,

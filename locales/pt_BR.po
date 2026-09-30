@@ -408,3 +408,66 @@ msgid "Mirrored document"
 msgid_plural "Mirrored documents"
 msgstr[0] "Documento espelhado"
 msgstr[1] "Documentos espelhados"
+
+msgid "Synchronize with the master (agent only)"
+msgstr "Sincronizar com o master (somente agent)"
+
+msgid "Synchronization failed: %s"
+msgstr "Falha na sincronização: %s"
+
+#, php-format
+msgid "Synchronized: %1$d change(s) sent, %2$d received."
+msgstr "Sincronizado: %1$d alteração(ões) enviada(s), %2$d recebida(s)."
+
+msgid "The master does not contact agents: they poll it. Check the last contact instead."
+msgstr "O master não contata os agents: são eles que consultam o master. Confira o último contato."
+
+msgid "Queued"
+msgstr "Na fila"
+
+msgid "Changes waiting for the next poll"
+msgstr "Alterações aguardando a próxima consulta"
+
+msgid ""
+"Reported by the agent, for reference only: the master never connects to it, "
+"the agent polls the master."
+msgstr ""
+"Informada pelo agent, apenas para referência: o master nunca se conecta a "
+"ele, é o agent que consulta o master."
+
+msgid "Agent poll interval (minutes)"
+msgstr "Intervalo de consulta dos agents (minutos)"
+
+msgid ""
+"The master never connects to the agents: each agent calls in at this interval "
+"to send its changes and collect the master's. Handed to the agents on their "
+"next poll."
+msgstr ""
+"O master nunca se conecta aos agents: cada agent chama o master neste "
+"intervalo para enviar as alterações dele e buscar as do master. Repassado aos "
+"agents na próxima consulta."
+
+msgid "Last synchronization"
+msgstr "Última sincronização"
+
+#, php-format
+msgid "every %d minute(s)"
+msgstr "a cada %d minuto(s)"
+
+msgid "Last synchronization error"
+msgstr "Último erro de sincronização"
+
+msgid "Synchronize now"
+msgstr "Sincronizar agora"
+
+msgid "Changes waiting for the agents to poll"
+msgstr "Alterações aguardando a consulta dos agents"
+
+msgid ""
+"Paste this token into each agent, together with this instance URL. It is "
+"exchanged once for credentials dedicated to that agent. Only the agent needs "
+"to reach the master: the master never connects to the agents."
+msgstr ""
+"Cole este token em cada agent, junto com a URL desta instância. Ele é trocado "
+"uma única vez por credenciais exclusivas daquele agent. Só o agent precisa "
+"alcançar o master: o master nunca se conecta aos agents."

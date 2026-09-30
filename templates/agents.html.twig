@@ -19,9 +19,9 @@
                   <th>{{ __('Entity') }}</th>
                   <th>{{ __('Status') }}</th>
                   <th class="text-end">{{ __('Tickets', 'pellissarisync') }}</th>
+                  <th class="text-end">{{ __('Queued', 'pellissarisync') }}</th>
                   <th>{{ __('Last contact', 'pellissarisync') }}</th>
                   <th>{{ __('Version') }}</th>
-                  <th></th>
                </tr>
             </thead>
             <tbody>
@@ -54,6 +54,7 @@
                         {% endif %}
                      </td>
                      <td class="text-end">{{ row.tickets }}</td>
+                     <td class="text-end">{{ row.queued }}</td>
                      <td>
                         {{ row.fields.last_contact ?? '-' }}
                         {% if row.fields.last_error %}
@@ -66,17 +67,6 @@
                            <span class="text-muted">{{ row.fields.remote_plugin_version }}</span>
                         {% else %}
                            -
-                        {% endif %}
-                     </td>
-                     <td class="text-end">
-                        {% if can_edit %}
-                           <form method="post" action="{{ path('/plugins/pellissarisync/front/agent.php') }}">
-                              <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}" />
-                              <button type="submit" name="ping" value="{{ row.fields.id }}"
-                                      class="btn btn-sm btn-outline-primary">
-                                 <i class="ti ti-wifi"></i> {{ __('Ping', 'pellissarisync') }}
-                              </button>
-                           </form>
                         {% endif %}
                      </td>
                   </tr>

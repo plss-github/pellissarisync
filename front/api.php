@@ -51,4 +51,6 @@ $headers = [
 
 $result = ApiServer::handle($action, $rawBody, $headers);
 
-return Compat::respondJson($result['body'], $result['status']);
+// A sync response carries changes the agent will apply, so it is signed with that
+// agent's secret; every other answer goes out unsigned, as before.
+return Compat::respondJson($result['body'], $result['status'], $result['sign_secret'] ?? null);

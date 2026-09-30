@@ -6,6 +6,7 @@ use Glpi\Console\AbstractCommand;
 use GlpiPlugin\Pellissarisync\Agent;
 use GlpiPlugin\Pellissarisync\ApiServer;
 use GlpiPlugin\Pellissarisync\Config;
+use GlpiPlugin\Pellissarisync\Exchange;
 use GlpiPlugin\Pellissarisync\Handshake;
 use GlpiPlugin\Pellissarisync\Outbox;
 use GlpiPlugin\Pellissarisync\Ping;
@@ -31,7 +32,6 @@ class ConfigureCommand extends AbstractCommand
 
         $this->addOption('role', null, InputOption::VALUE_REQUIRED, 'agent or master');
         $this->addOption('master-url', null, InputOption::VALUE_REQUIRED, 'Base URL of the master (agent only)');
-        $this->addOption('own-url', null, InputOption::VALUE_REQUIRED, 'Base URL of this agent, as reachable by the master');
         $this->addOption('enrollment-token', null, InputOption::VALUE_REQUIRED, 'Enrollment token issued by the master');
         $this->addOption('category-id', null, InputOption::VALUE_REQUIRED, 'ITIL category id used for mirroring');
         $this->addOption('title-prefix', null, InputOption::VALUE_REQUIRED, 'Title prefix template, e.g. "[{client}]"');
@@ -40,8 +40,10 @@ class ConfigureCommand extends AbstractCommand
         $this->addOption('entity', null, InputOption::VALUE_REQUIRED, 'Customer entity id to bind to --link-agent');
         $this->addOption('test-ticket', null, InputOption::VALUE_NONE, 'Create a test ticket in the synchronized category');
         $this->addOption('user', null, InputOption::VALUE_REQUIRED, 'Act as this GLPI user (needed for authored tickets)', 'glpi');
-        $this->addOption('ping', null, InputOption::VALUE_REQUIRED, 'Ping a peer by id, or "master" from an agent');
-        $this->addOption('flush', null, InputOption::VALUE_NONE, 'Deliver the pending outbox entries now');
+        $this->addOption('ping', null, InputOption::VALUE_REQUIRED, 'Ping the master, from an agent ("master")');
+        $this->addOption('sync', null, InputOption::VALUE_NONE, 'Poll the master now: send the pending changes and collect its own (agent only)');
+        $this->addOption('flush', null, InputOption::VALUE_NONE, 'Alias of --sync');
+        $this->addOption('poll-interval', null, InputOption::VALUE_REQUIRED, 'Minutes between two agent polls (master only)');
         $this->addOption('show', null, InputOption::VALUE_NONE, 'Print the current configuration');
     }
 
@@ -61,7 +63,6 @@ class ConfigureCommand extends AbstractCommand
         foreach (
             [
             'master-url'       => 'master_url',
-            'own-url'          => 'own_url',
             'enrollment-token' => 'enrollment_token',
             'title-prefix'     => 'title_prefix_template',
             ] as $option => $key
@@ -76,6 +77,15 @@ class ConfigureCommand extends AbstractCommand
             Config::set($values);
             Config::reset();
             $output->writeln('<info>Configuration updated.</info>');
+        }
+
+        if (($minutes = $input->getOption('poll-interval')) !== null) {
+            Config::set(['poll_interval' => Exchange::clampMinutes((int) $minutes)]);
+            Config::reset();
+            $output->writeln(sprintf(
+                '<info>Poll interval set to %d minute(s); agents pick it up on their next poll.</info>',
+                (int) Config::get('poll_interval')
+            ));
         }
 
         if (($category = $input->getOption('category-id')) !== null) {
@@ -157,9 +167,22 @@ class ConfigureCommand extends AbstractCommand
             }
         }
 
-        if ($input->getOption('flush')) {
-            $delivered = Outbox::flush(100);
-            $output->writeln(sprintf('<info>%d delivery(ies) succeeded.</info>', $delivered));
+        if ($input->getOption('sync') || $input->getOption('flush')) {
+            if (!Config::isAgent()) {
+                $output->writeln('<error>only an agent syncs: the master waits for the agents to poll it</error>');
+
+                return self::FAILURE;
+            }
+
+            $result = Exchange::run();
+
+            $output->writeln(
+                ($result['ok'] ? '<info>' : '<error>') . $result['message'] . ($result['ok'] ? '</info>' : '</error>')
+            );
+
+            if (!$result['ok']) {
+                return self::FAILURE;
+            }
         }
 
         if ($input->getOption('show') || $values === []) {
@@ -184,6 +207,7 @@ class ConfigureCommand extends AbstractCommand
 
         if (Config::isMaster()) {
             $output->writeln(sprintf('  enrollment token : %s', Config::enrollmentToken()));
+            $output->writeln(sprintf('  poll interval    : %d min', (int) Config::get('poll_interval')));
             $output->writeln(sprintf(
                 '  registered agents: %d',
                 countElementsInTable(Agent::getTable(), ['is_master' => 0])
@@ -193,6 +217,16 @@ class ConfigureCommand extends AbstractCommand
         if (Config::isAgent()) {
             $output->writeln(sprintf('  master url       : %s', Config::masterUrl()));
             $output->writeln(sprintf('  handshake        : %s', (string) Config::get('handshake_status')));
+            $output->writeln(sprintf(
+                '  last sync        : %s (every %d min)',
+                (string) Config::get('last_poll') ?: 'never',
+                (int) Config::get('poll_interval')
+            ));
+
+            $pollError = (string) Config::get('last_poll_error');
+            if ($pollError !== '') {
+                $output->writeln(sprintf('  last sync error  : <error>%s</error>', $pollError));
+            }
 
             $error = (string) Config::get('last_handshake_error');
             if ($error !== '') {

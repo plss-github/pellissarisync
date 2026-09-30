@@ -6,7 +6,7 @@ use GlpiPlugin\Pellissarisync\Protocol\Envelope;
 use GlpiPlugin\Pellissarisync\Transport\Client;
 
 /**
- * Connectivity check against a peer.
+ * Connectivity check against the master, from an agent.
  */
 final class Ping
 {
@@ -15,6 +15,17 @@ final class Ping
      */
     public static function run(Agent $agent): array
     {
+        // The master does not call agents. What it knows of one is when the agent
+        // last called in, which the agent screen shows as the last contact.
+        if (Config::isMaster()) {
+            return [
+                'ok'      => false,
+                'message' => __('The master does not contact agents: they poll it. Check the last contact instead.', 'pellissarisync'),
+                'status'  => 0,
+                'body'    => [],
+            ];
+        }
+
         if ($agent->getUrl() === '') {
             return [
                 'ok'      => false,

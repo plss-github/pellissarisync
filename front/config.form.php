@@ -18,6 +18,7 @@ use GlpiPlugin\Pellissarisync\Agent;
 use GlpiPlugin\Pellissarisync\ApiServer;
 use GlpiPlugin\Pellissarisync\Assignees;
 use GlpiPlugin\Pellissarisync\Config;
+use GlpiPlugin\Pellissarisync\Exchange;
 use GlpiPlugin\Pellissarisync\Handshake;
 use GlpiPlugin\Pellissarisync\Outbox;
 use GlpiPlugin\Pellissarisync\Ping;
@@ -34,12 +35,12 @@ if (isset($_POST['update'])) {
 
     if ($values['role'] === Config::ROLE_AGENT) {
         $values['master_url']                = (string) ($_POST['master_url'] ?? '');
-        $values['own_url']                   = (string) ($_POST['own_url'] ?? '');
         $values['enrollment_token']          = (string) ($_POST['enrollment_token'] ?? '');
         $values['trigger_itilcategories_id'] = (int) ($_POST['trigger_itilcategories_id'] ?? 0);
     } else {
         $values['mirror_itilcategories_id'] = (int) ($_POST['mirror_itilcategories_id'] ?? 0);
         $values['run_business_rules']       = (int) ($_POST['run_business_rules'] ?? 0);
+        $values['poll_interval']            = Exchange::clampMinutes((int) ($_POST['poll_interval'] ?? 0));
 
         // The dropdowns post arrays; ids are stored comma-separated, as core does for
         // the multi-value fields of a notification target.
@@ -83,6 +84,17 @@ if (isset($_POST['ping_master'])) {
         );
     }
 
+    Html::back();
+}
+
+if (isset($_POST['sync_now'])) {
+    $result = Exchange::run();
+
+    Session::addMessageAfterRedirect(
+        htmlescape($result['message']),
+        true,
+        $result['ok'] ? INFO : ERROR
+    );
     Html::back();
 }
 

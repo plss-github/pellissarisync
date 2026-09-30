@@ -12,7 +12,6 @@ use Glpi\Application\View\TemplateRenderer;
 use GlpiPlugin\Pellissarisync\Agent;
 use GlpiPlugin\Pellissarisync\Assignees;
 use GlpiPlugin\Pellissarisync\Config;
-use GlpiPlugin\Pellissarisync\Ping;
 use GlpiPlugin\Pellissarisync\Schema;
 
 Session::checkRight(Schema::RIGHT_AGENT, READ);
@@ -51,22 +50,6 @@ if (isset($_POST['update'])) {
     Html::back();
 }
 
-if (isset($_POST['ping'])) {
-    Session::checkRight(Schema::RIGHT_AGENT, UPDATE);
-
-    if ($agent->getFromDB((int) $_POST['ping'])) {
-        $result = Ping::run($agent);
-
-        Session::addMessageAfterRedirect(
-            htmlescape($result['message']),
-            true,
-            $result['ok'] ? INFO : ERROR
-        );
-    }
-
-    Html::back();
-}
-
 if (isset($_POST['revoke'])) {
     Session::checkRight(Schema::RIGHT_AGENT, UPDATE);
 
@@ -100,6 +83,7 @@ Html::header(
 TemplateRenderer::getInstance()->display('@pellissarisync/agent_form.html.twig', [
     'agent'    => $agent->fields,
     'tickets'  => $agent->countTickets(),
+    'queued'   => $agent->countQueued(),
     'can_edit' => Session::haveRight(Schema::RIGHT_AGENT, UPDATE),
     // Same pickers as the global screen, see Assignees.
     'assign_users_field'  => Assignees::usersDropdown(

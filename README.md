@@ -6,6 +6,51 @@ Um único código-base roda nas duas pontas; o papel escolhido na configuração
 
 Autor: **Ampris**. Requer **GLPI 10.0 ou 11.x** — clientes ainda em 10 podem espelhar contra um master em 11, e o caminho cross-version é exercitado nos testes.
 
+## Comunicação: o master é passivo
+
+O master **nunca abre conexão** com o agent. Na prática ele quase nunca consegue: a
+rede do cliente deixa o agent sair, mas não deixa nada entrar. Por isso toda conversa
+é iniciada pelo agent — **o POST é o caminho de ida, a resposta HTTP é o de volta**.
+
+```
+agent ── POST handshake ──▶ master     token de registro (uma vez)
+agent ◀── 200 ───────────── master     credenciais + configurações (intervalo de consulta)
+
+a cada 5 min (cron "poll" do agent):
+agent ── POST sync ───────▶ master     acks do que o master mandou na rodada anterior
+                                       + alterações pendentes do agent
+agent ◀── 200 (assinado) ── master     resultado de cada alteração do agent
+                                       + alterações pendentes do master
+                                       + configurações
+```
+
+- **Handshake.** Além das credenciais, o master devolve as configurações daquele
+  agent — hoje, o intervalo de consulta (**Configurar → Plugins → Pellissari Sync**,
+  no master; 5 minutos por padrão). É isso que cria/ajusta a ação automática `poll`
+  do agent, e logo em seguida o agent já faz a primeira sincronização.
+- **Sync.** Numa mesma execução do cron o agent repete a troca enquanto houver algo a
+  mover (até 10 rodadas, 25 eventos por direção e ~4 MB por rodada), então uma rajada
+  de alterações drena de uma vez, e não uma leva a cada 5 minutos.
+- **Alterações do agent** continuam saindo **na hora** (POST direto, como antes). O
+  sync é a rede de proteção: o que falhou vai de novo na próxima troca.
+- **Alterações do master** ficam na `outbox` dele e só saem **na resposta** do próximo
+  sync. A latência master → agent passa a ser, no pior caso, o intervalo de consulta.
+- **O ack vem na requisição seguinte**, porque o agent só consegue responder depois de
+  aplicar. Entregar ao agent conta como tentativa: o evento fica "emprestado" pelo
+  backoff (60s → 1h) e, se o ack não chegar, é entregue de novo — o `inbox` do agent
+  transforma a repetição num no-op que devolve o resultado guardado. Oito entregas sem
+  ack e a linha vira `dead`.
+
+O endpoint do agent (`front/api.php`) continua respondendo, apenas para masters
+anteriores à 1.5.0, que ainda empurram eventos. Um master atual não chama agent nenhum
+— nem para ping: na tela do agent, no master, vale o **último contato**, que é a
+última vez que aquele agent consultou.
+
+> **Atualize os agents antes do master.** Um master 1.5.0 não empurra mais nada: um
+> agent em versão anterior nunca consulta e nunca recebe as alterações da central.
+> Agent 1.5.0 contra master antigo funciona (o master antigo empurra, e o `sync`
+> responde 404 até o master ser atualizado).
+
 ## A regra central: propagação por origem
 
 Quem cria um conteúdo é o único dono dele.
@@ -175,10 +220,11 @@ php bin/console plugins:pellissarisync:configure --show
 
 ### No agent
 
-1. Informe a URL do master, a URL desta instância (como o master a alcança) e cole o token de registro.
-2. **Conectar ao master** — o token é trocado uma única vez por credenciais dedicadas a este agent.
+1. Informe a URL do master e cole o token de registro. Só o agent precisa alcançar o master; o caminho inverso não é usado.
+2. **Conectar ao master** — o token é trocado uma única vez por credenciais dedicadas a este agent, e o master devolve o intervalo de consulta. A ação automática `poll` fica agendada nesse intervalo (ela é do tipo *externo*: o `cron.php` do GLPI precisa estar no crontab do servidor).
 3. Escolha a categoria que dispara o espelhamento (`Suporte Pellissari - Fluídez Digital` é criada na instalação).
 4. **Gerar chamado de teste** valida a cadeia inteira.
+5. **Sincronizar agora** força uma consulta sem esperar o cron.
 
 ## Regras de negócio e atribuição
 
@@ -224,12 +270,20 @@ tem contrapartida na outra instalação.
 - Endpoint próprio (`front/api.php`), declarado *stateless* em `plugin_pellissarisync_boot()`: sem sessão, sem cookie, sem CSRF — a autenticação é toda do plugin.
 - Cada requisição carrega uuid + token e é assinada com **HMAC-SHA256 sobre o corpo cru**; a verificação usa `hash_equals`.
 - O handshake não usa o token como *bearer*: ele é a **chave HMAC** daquela requisição, provando posse sem trafegar como credencial reutilizável.
+- A **resposta do sync também é assinada** (`X-PSync-Sign`, HMAC do corpo com o segredo do agent) e o agent a recusa sem assinatura válida: é ela que traz o que será gravado no GLPI do cliente, então não basta confiar em quem respondeu no endereço do master.
+- Um agent só consegue dar ack nas linhas da `outbox` endereçadas a ele.
 - Tokens e segredos ficam cifrados no banco (`GLPIKey`), como o core faz com `glpi_apiclients.app_token`.
 - Conteúdo HTML recebido da outra ponta passa por `RichText::getSafeHtml()`; o cabeçalho de autoria passa por `htmlescape()`.
 
 ## Entrega confiável
 
-Toda alteração é enfileirada na `outbox` e enviada na hora. Se a outra ponta estiver fora do ar, a linha fica pendente e o `CronTask` reenvia com backoff exponencial (60s → 1h, 8 tentativas). A operação do usuário **nunca falha** por causa do espelhamento.
+Toda alteração é enfileirada na `outbox`. No agent ela é enviada na hora; se o master
+estiver fora do ar, a linha fica pendente e segue no próximo sync, com backoff
+exponencial (60s → 1h). Falha de **transporte** (master inacessível) não conta
+tentativa — um master fora do ar por um dia não pode custar a fila do cliente; só uma
+recusa de verdade (4xx/5xx) conta, e oito recusas levam a linha a `dead`. No master a
+linha espera o sync do agent (veja *Comunicação*). A operação do usuário **nunca
+falha** por causa do espelhamento.
 
 Agent ainda *pendente* no master não é falha, é o passo do cadastro: a linha **espera**
 (5min por vez) sem gastar tentativa, e a fila drena sozinha quando o administrador
@@ -245,10 +299,11 @@ Contra duplicatas há três camadas: guarda de reentrância por requisição, ma
 
 ```bash
 php bin/console plugins:pellissarisync:configure --show
-php bin/console plugins:pellissarisync:configure --ping=master     # ou --ping=<id>
-php bin/console plugins:pellissarisync:configure --link-agent=1 --entity=3
+php bin/console plugins:pellissarisync:configure --ping=master     # agent
+php bin/console plugins:pellissarisync:configure --sync            # agent: consulta o master agora
+php bin/console plugins:pellissarisync:configure --link-agent=1 --entity=3   # master
+php bin/console plugins:pellissarisync:configure --poll-interval=5 # master, em minutos
 php bin/console plugins:pellissarisync:configure --test-ticket --user=glpi
-php bin/console plugins:pellissarisync:configure --flush
 ```
 
 Existe porque o token de registro é cifrado com a chave de cada instância: só pode ser lido de volta pela API do próprio plugin, nunca por SQL.
@@ -269,7 +324,7 @@ su www-data -s /bin/bash -c \
 | `..._mirrorfollowups` | Vínculo do que **chega como acompanhamento** sendo outra coisa na origem; `source_itemtype` separa os casos, já que uma solução #5 e um acompanhamento #5 têm o mesmo id em tabelas diferentes |
 | `..._mirroritems` | Vínculo dos itens que **mantêm o itemtype nas duas pontas**: tarefa, custo, aprovação e solução. Tabela separada porque a de acompanhamentos registra uma tradução, e a coluna `itilfollowups_id` dela não pode honestamente guardar o id de um custo |
 | `..._mirrordocuments` | Mapeia o anexo local ao id dele na outra ponta — o GLPI usa a mesma tabela `glpi_documents` nas duas, então os ids necessariamente divergem |
-| `..._outbox` | Fila de saída com estado, tentativas e backoff |
+| `..._outbox` | Fila de saída com estado, tentativas e backoff. No master, é o que espera o próximo sync de cada agent |
 | `..._inbox` | Registro de idempotência de entrada |
 
 ## Compatibilidade GLPI 10 / 11

@@ -15,6 +15,10 @@ use RuntimeException;
  * possession of that token (it is the HMAC key of the request, never a bearer
  * value in a header) and exchanges it for credentials dedicated to that one
  * agent -- so no shared global secret is ever used for day-to-day traffic.
+ *
+ * The master's answer also carries its settings for that agent (the poll interval
+ * above all), which is what sets up the agent's poll cron task. From then on the
+ * agent calls in on its own and the master only ever answers -- see Exchange.
  */
 final class Handshake
 {
@@ -93,6 +97,9 @@ final class Handshake
                 'link_status'    => (string) $agent->fields['link_status'],
                 'glpi_version'   => GLPI_VERSION,
                 'plugin_version' => PLUGIN_PELLISSARISYNC_VERSION,
+                // How this agent must behave from now on -- above all, how often to
+                // poll, since polling is the only way the master can reach it.
+                'settings'       => Exchange::settings(),
             ],
         ];
     }
@@ -120,14 +127,11 @@ final class Handshake
             ];
         }
 
-        $ownUrl = (string) Config::get('own_url', '');
-        if ($ownUrl === '') {
-            $ownUrl = (string) ($CFG_GLPI['url_base'] ?? '');
-        }
-
         $payload = [
             'name'           => (string) ($CFG_GLPI['name'] ?? '') ?: Payload::clientNameForEntity(0),
-            'url'            => rtrim($ownUrl, '/'),
+            // Informational only: the master never calls it. It helps whoever links
+            // the agent on the master to recognize which installation this is.
+            'url'            => rtrim((string) ($CFG_GLPI['url_base'] ?? ''), '/'),
             // On the agent the entity name IS the customer name, and that is what
             // composes the [Customer] prefix on the master.
             'client_name'    => Payload::clientNameForEntity(0),
@@ -175,7 +179,18 @@ final class Handshake
             'last_handshake_error' => '',
         ]);
 
-        return ['ok' => true, 'message' => __('Connected to the master.', 'pellissarisync')];
+        // Stores the settings and sets up the poll task at the interval the
+        // master chose.
+        Exchange::applySettings($body);
+
+        // The first poll right away, so that whatever was queued while
+        // disconnected does not wait a full interval.
+        $sync = Exchange::run();
+
+        return [
+            'ok'      => true,
+            'message' => __('Connected to the master.', 'pellissarisync') . ' ' . $sync['message'],
+        ];
     }
 
     private static function storeMaster(string $masterUuid, string $masterUrl, array $body): void

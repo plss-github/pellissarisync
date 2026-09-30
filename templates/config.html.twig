@@ -36,10 +36,6 @@
                      'helper': __('Base URL of the support desk GLPI, for example http://glpi-master', 'pellissarisync')
                   }) }}
 
-                  {{ fields.textField('own_url', config.own_url, __('URL of this instance', 'pellissarisync'), {
-                     'helper': __('How the master reaches this agent. Leave empty to use the GLPI base URL.', 'pellissarisync')
-                  }) }}
-
                   {{ fields.textField('enrollment_token', config.enrollment_token, __('Enrollment token', 'pellissarisync'), {
                      'helper': __('Copied from the master configuration screen. Used once to obtain dedicated credentials.', 'pellissarisync')
                   }) }}
@@ -65,6 +61,12 @@
 
                   {{ fields.textField('title_prefix_template', config.title_prefix_template, __('Title prefix', 'pellissarisync'), {
                      'helper': __('{client} is replaced by the customer name reported by the agent.', 'pellissarisync')
+                  }) }}
+
+                  {{ fields.numberField('poll_interval', config.poll_interval, __('Agent poll interval (minutes)', 'pellissarisync'), {
+                     'min': 1,
+                     'max': 1440,
+                     'helper': __('The master never connects to the agents: each agent calls in at this interval to send its changes and collect the master\'s. Handed to the agents on their next poll.', 'pellissarisync')
                   }) }}
 
                   {{ fields.checkboxField('run_business_rules', config.run_business_rules, __('Run the business rules on mirrored tickets', 'pellissarisync'), {
@@ -136,6 +138,21 @@
                            <td class="text-danger">{{ config.last_handshake_error }}</td>
                         </tr>
                      {% endif %}
+                     <tr>
+                        <th>{{ __('Last synchronization', 'pellissarisync') }}</th>
+                        <td>
+                           {{ config.last_poll ?: '-' }}
+                           <span class="text-muted small">
+                              ({{ __('every %d minute(s)', 'pellissarisync')|format(config.poll_interval) }})
+                           </span>
+                        </td>
+                     </tr>
+                     {% if config.last_poll_error %}
+                        <tr>
+                           <th>{{ __('Last synchronization error', 'pellissarisync') }}</th>
+                           <td class="text-danger">{{ config.last_poll_error }}</td>
+                        </tr>
+                     {% endif %}
                      {% if master_agent %}
                         <tr>
                            <th>{{ __('Master version', 'pellissarisync') }}</th>
@@ -170,6 +187,13 @@
 
                   <form method="post" action="{{ path('/plugins/pellissarisync/front/config.form.php') }}">
                      <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}" />
+                     <button type="submit" name="sync_now" value="1" class="btn btn-outline-primary">
+                        <i class="ti ti-refresh"></i> {{ __('Synchronize now', 'pellissarisync') }}
+                     </button>
+                  </form>
+
+                  <form method="post" action="{{ path('/plugins/pellissarisync/front/config.form.php') }}">
+                     <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}" />
                      <button type="submit" name="ensure_category" value="1" class="btn btn-outline-secondary">
                         <i class="ti ti-category-plus"></i> {{ __('Create the default category', 'pellissarisync') }}
                      </button>
@@ -192,7 +216,7 @@
                <h3 class="card-title">{{ __('Enrollment', 'pellissarisync') }}</h3>
             </div>
             <div class="card-body">
-               <p>{{ __('Paste this token into each agent, together with this instance URL. It is exchanged once for credentials dedicated to that agent.', 'pellissarisync') }}</p>
+               <p>{{ __('Paste this token into each agent, together with this instance URL. It is exchanged once for credentials dedicated to that agent. Only the agent needs to reach the master: the master never connects to the agents.', 'pellissarisync') }}</p>
 
                <div class="input-group mb-3">
                   <input type="text" class="form-control font-monospace" readonly value="{{ enrollment_token }}" />
@@ -209,7 +233,7 @@
                         <td>{{ status.mirrored }}</td>
                      </tr>
                      <tr>
-                        <th>{{ __('Deliveries awaiting retry', 'pellissarisync') }}</th>
+                        <th>{{ __('Changes waiting for the agents to poll', 'pellissarisync') }}</th>
                         <td>{{ pending_count }}</td>
                      </tr>
                   </tbody>

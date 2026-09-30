@@ -3,6 +3,7 @@
 namespace GlpiPlugin\Pellissarisync;
 
 use DBmysql;
+use GlpiPlugin\Pellissarisync\Protocol\Envelope;
 use Glpi\Toolbox\Sanitizer;
 use GuzzleHttp\Client;
 use Session;
@@ -254,22 +255,33 @@ final class Compat
      *
      * GLPI 11 uses whatever Response the script returns; GLPI 10 has no such
      * mechanism, so the body is written out directly.
+     *
+     * With a $signSecret the exact bytes sent are signed into a response header.
+     * The body is encoded once, here, and handed to the Response as a raw string:
+     * letting JsonResponse re-encode the array could produce different bytes than
+     * the ones signed.
      */
-    public static function respondJson(array $body, int $status): mixed
+    public static function respondJson(array $body, int $status, ?string $signSecret = null): mixed
     {
-        $json = (string) json_encode($body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $json = Envelope::encode($body);
+
+        $headers = ['Content-Type' => 'application/json'];
+        if ($signSecret !== null && $signSecret !== '') {
+            $headers[Envelope::HEADER_SIGN] = Envelope::sign($json, $signSecret);
+        }
 
         if (!self::isLegacy() && class_exists(\Symfony\Component\HttpFoundation\JsonResponse::class)) {
-            return new \Symfony\Component\HttpFoundation\JsonResponse($body, $status);
+            return new \Symfony\Component\HttpFoundation\JsonResponse($json, $status, $headers, true);
         }
 
         if (!headers_sent()) {
             http_response_code($status);
-            header('Content-Type: application/json');
+            foreach ($headers as $name => $value) {
+                header($name . ': ' . $value);
+            }
         }
 
         echo $json;
         exit;
     }
-
 }

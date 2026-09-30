@@ -181,6 +181,18 @@ class Agent extends CommonDBTM
         );
     }
 
+    /**
+     * Changes queued for this peer and not delivered yet. On the master these wait
+     * for the agent's next poll.
+     */
+    public function countQueued(): int
+    {
+        return countElementsInTable(Outbox::TABLE, [
+            'plugin_pellissarisync_agents_id' => $this->getID(),
+            'state'                           => [Outbox::STATE_PENDING, Outbox::STATE_FAILED],
+        ]);
+    }
+
     public function getEntityName(): string
     {
         $entities_id = (int) ($this->fields['entities_id'] ?? 0);

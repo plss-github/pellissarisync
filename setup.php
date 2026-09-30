@@ -16,7 +16,7 @@ use GlpiPlugin\Pellissarisync\Config;
 use GlpiPlugin\Pellissarisync\Hook;
 use GlpiPlugin\Pellissarisync\Mirror;
 
-define('PLUGIN_PELLISSARISYNC_VERSION', '1.4.1');
+define('PLUGIN_PELLISSARISYNC_VERSION', '1.5.0');
 
 // Customers still run GLPI 10.0.x while the support desk runs 11, so both are
 // supported and may be mirrored against each other. `max` is exclusive.

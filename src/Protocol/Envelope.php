@@ -17,6 +17,7 @@ final class Envelope
 
     public const ACTION_HANDSHAKE      = 'handshake';
     public const ACTION_PING           = 'ping';
+    public const ACTION_SYNC           = 'sync';
     public const ACTION_TICKET_CREATE  = 'ticket.create';
     public const ACTION_TICKET_CONTENT = 'ticket.content.update';
     public const ACTION_TICKET_STATUS  = 'ticket.status.update';
@@ -49,6 +50,19 @@ final class Envelope
         return [
             self::ACTION_HANDSHAKE,
             self::ACTION_PING,
+            self::ACTION_SYNC,
+            ...self::eventActions(),
+        ];
+    }
+
+    /**
+     * The actions that describe a change to a mirrored ticket -- everything that
+     * can sit in an outbox and travel inside a sync exchange. The control actions
+     * (handshake, ping, sync itself) are not events and are refused there.
+     */
+    public static function eventActions(): array
+    {
+        return [
             self::ACTION_TICKET_CREATE,
             self::ACTION_TICKET_CONTENT,
             self::ACTION_TICKET_STATUS,

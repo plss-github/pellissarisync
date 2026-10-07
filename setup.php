@@ -58,7 +58,7 @@ function plugin_pellissarisync_boot(): void
 function plugin_version_pellissarisync(): array
 {
     return [
-        'name'         => 'Pellissari Sync',
+        'name'         => __('Pellissari Sync', 'pellissarisync'),
         'version'      => PLUGIN_PELLISSARISYNC_VERSION,
         'author'       => 'Ampris',
         'license'      => 'GPLv3+',
